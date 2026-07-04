@@ -1,0 +1,13 @@
+project:
+  name: "fall-project"
+  seed: 42
+
+paths:
+  data_root: "data"
+  raw: "${paths.data_root}/raw"
+  harmonized: "${paths.data_root}/harmonized"
+  external: "${paths.data_root}/external"
+  results_root: "results"
+
+logging:
+  use_wandb: true

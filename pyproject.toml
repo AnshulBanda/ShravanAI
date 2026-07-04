@@ -1,0 +1,23 @@
+[project]
+name = "fall-project"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "omegaconf",
+    "openpyxl",
+    "pyarrow",
+]
+
+[project.optional-dependencies]
+tracking = ["wandb"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["shared*", "detection*", "prediction*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

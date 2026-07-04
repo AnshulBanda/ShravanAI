@@ -1,0 +1,8 @@
+defaults:
+  - ../base
+
+dataset:
+  name: "kfall"
+  sensor_root: "${paths.raw}/kfall/sensor_data"
+  label_root: "${paths.raw}/kfall/label_data"
+  native_rate_hz: 100

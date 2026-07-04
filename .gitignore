@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+
+# Real dataset files -- never committed, only fetched/harmonized locally or on Kaggle
+data/raw/*
+!data/raw/.gitkeep
+data/harmonized/*
+!data/harmonized/.gitkeep
+data/external/*
+!data/external/.gitkeep
+
+# Run outputs
+results/*
+!results/.gitkeep
+
+# wandb local cache
+wandb/

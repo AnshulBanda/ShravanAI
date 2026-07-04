@@ -1,0 +1,8 @@
+pandas
+numpy
+scipy
+omegaconf
+openpyxl
+pyarrow
+pytest
+# wandb   # uncomment once you're ready to use real experiment tracking
