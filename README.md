@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Fall Detection & Fall Prediction — Research Codebase
 
 Two independent pipelines sharing one harmonization/data layer. See
@@ -76,3 +77,6 @@ data/raw/            Untouched dataset downloads (gitignored)
 data/harmonized/     Persisted harmonized continuous signals + manifest (gitignored)
 results/             Per-run logs/configs/checkpoints (gitignored)
 ```
+=======
+# ShravanAI
+>>>>>>> b9692449f3ecc668e812bca5f1dfaea4fe95a2ca
