@@ -40,15 +40,15 @@ FALL_TASK_IDS = frozenset(range(22, 37))
 TRIAL_FILENAME_RE = re.compile(r"^S(A)?(\d+)T(\d+)R(\d+)\.csv$", re.IGNORECASE)
 
 EXPECTED_SENSOR_COLUMNS = [
-    "TimeStamp", "FrameCounter",
+    "TimeStamp(s)", "FrameCounter",
     "AccX", "AccY", "AccZ",
-    "GyroX", "GyroY", "GyroZ",
+    "GyrX", "GyrY", "GyrZ",
     "EulerX", "EulerY", "EulerZ",
 ]
 
 _RENAME_MAP = {
     "AccX": "acc_x", "AccY": "acc_y", "AccZ": "acc_z",
-    "GyroX": "gyro_x", "GyroY": "gyro_y", "GyroZ": "gyro_z",
+    "GyrX": "gyro_x", "GyrY": "gyro_y", "GyrZ": "gyro_z",
     "EulerX": "euler_x", "EulerY": "euler_y", "EulerZ": "euler_z",
 }
 
@@ -115,7 +115,7 @@ def read_sensor_csv(path: Path) -> pd.DataFrame:
         raise ValueError(f"{path.name}: missing expected columns {sorted(missing)}")
 
     df = df.rename(columns=_RENAME_MAP)
-    df["time_s"] = df["TimeStamp"].astype(float)
+    df["time_s"] = df["TimeStamp(s)"].astype(float)
 
     return df[_SIGNAL_COLUMN_ORDER].reset_index(drop=True)
 
