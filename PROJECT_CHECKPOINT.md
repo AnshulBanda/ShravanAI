@@ -1,6 +1,6 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.2 (resampling)
+Last updated: after Stage 3, Task 3.3 (band-pass filtering)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -90,17 +90,41 @@ Tests: `tests/test_resample.py` (9 tests, including an explicit
 anti-aliasing correctness check on an 80 Hz signal). Commit: "Add
 resampling module with anti-alias filtering"
 
-**Current total test count: 35 passed** (10 Stage 2 + 7 Task 3.1 + 9
-Task 3.2 + others — run `pytest tests/ -v` to confirm current count
-matches before trusting this number blindly; it should only grow from here).
+#### Task 3.3 — COMPLETE
+`shared/harmonize/filtering.py`: `apply_bandpass_filter(signal, columns,
+sample_rate_hz, low_hz=0.5, high_hz=20.0, order=4)`, 4th-order
+Butterworth band-pass via `scipy.signal.butter` + `filtfilt` (zero-phase,
+no time-shift -- important since onset/impact frame indices must stay
+aligned to the original samples). Raises `ValueError` if `high_hz` is at
+or above the Nyquist frequency for the given sample rate.
 
-#### Next up: Task 3.3 — Butterworth band-pass filter (0.5–20 Hz)
-Not yet started as of this checkpoint.
+**Concrete empirical result validating the 0.5-20 Hz choice over the
+originally-proposed 5 Hz low-pass** (synthetic fall-impact-like pulse,
+100ms half-sine, amplitude 5, on a noisy background): the 0.5-20 Hz
+band-pass retained **95.6%** of the impact peak amplitude; a straight
+5 Hz low-pass (the original proposal) retained only **54.0%**. This is
+the strongest evidence yet that the cutoff correction was the right
+call -- worth citing if this decision is ever questioned later.
 
-#### Remaining after that: 3.4 (stationary-segment detector), 3.5
-(per-subject calibration), 3.6 (group-average fallback), 3.7
-(harmonization orchestrator), 3.8 (validation checks), 3.9 (provenance
-writer), 3.10 (end-to-end KFall harmonization script), 3.11 (visual QA).
+Tests: `tests/test_filtering.py` (7 tests: composite drift/movement/noise
+signal, impact-spike retention, DC attenuation, zero-phase/no-time-shift,
+passthrough of non-filtered columns, Nyquist guard, no-mutation).
+Commit: "Add Butterworth band-pass filtering (0.5-20 Hz) module"
+
+**Current total test count: 42 passed** -- run `pytest tests/ -v` to
+confirm current count matches before trusting this number blindly; it
+should only grow from here.
+
+#### Next up: Task 3.4 — Stationary-segment detector
+Not yet started as of this checkpoint. Generic function to find a quiet
+window in a signal via rolling acceleration-variance and gyro-magnitude
+thresholds -- used both for validating T01 and for the standing-initiated-
+trial auto-detect fallback (Task 3.5).
+
+#### Remaining after that: 3.5 (per-subject calibration), 3.6
+(group-average fallback), 3.7 (harmonization orchestrator), 3.8
+(validation checks), 3.9 (provenance writer), 3.10 (end-to-end KFall
+harmonization script), 3.11 (visual QA).
 
 ---
 
