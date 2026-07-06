@@ -27,7 +27,17 @@ KFALL_NATIVE_RATE_HZ = 100.0
 # other task ID is an activity of daily living.
 FALL_TASK_IDS = frozenset(range(22, 37))
 
-TRIAL_FILENAME_RE = re.compile(r"^(SA\d+)T(\d+)R(\d+)\.csv$", re.IGNORECASE)
+
+# NOTE on naming variants: the official KFall release names sensor CSVs
+# "SAxxTyyRzz.csv" (e.g. SA06T01R01.csv). At least one Kaggle mirror
+# (usmanabbasi2002/kfall-dataset) drops the "A" from the *filename* while
+# keeping it in the parent folder name -- i.e. folder "SA06/" contains
+# "S06T01R01.csv", not "SA06T01R01.csv". Label files on that same mirror
+# keep the full "SAxx_label.xlsx" naming, so only sensor CSV filenames
+# are affected. The "A" is made optional here and the subject number is
+# always re-normalized to canonical "SAxx" form on output, so callers
+# never need to know which naming variant a given mirror used.
+TRIAL_FILENAME_RE = re.compile(r"^S(A)?(\d+)T(\d+)R(\d+)\.csv$", re.IGNORECASE)
 
 EXPECTED_SENSOR_COLUMNS = [
     "TimeStamp", "FrameCounter",
@@ -73,15 +83,23 @@ class ParsedTrial:
 def parse_trial_filename(filename: str) -> tuple[str, int, str]:
     """Extract (subject_id, task_id, trial_id) from a KFall sensor filename.
 
+    Accepts both the official "SAxxTyyRzz.csv" naming and the
+    "SxxTyyRzz.csv" (dropped-"A") variant seen on at least one Kaggle
+    mirror -- either way, the returned subject_id is always normalized
+    to canonical "SAxx" form.
+
     e.g. "SA06T20R01.csv" -> ("SA06", 20, "R01")
+         "S06T20R01.csv"  -> ("SA06", 20, "R01")
     """
     match = TRIAL_FILENAME_RE.match(filename)
     if not match:
         raise ValueError(
-            f"Filename does not match expected KFall pattern 'SAxxTyyRzz.csv': {filename!r}"
+            f"Filename does not match expected KFall pattern "
+            f"'SAxxTyyRzz.csv' (or the dropped-A 'SxxTyyRzz.csv' variant): {filename!r}"
         )
-    subject_id, task_str, trial_str = match.groups()
-    return subject_id.upper(), int(task_str), f"R{trial_str}"
+    _has_a, subject_num, task_str, trial_str = match.groups()
+    subject_id = f"SA{int(subject_num):02d}"
+    return subject_id, int(task_str), f"R{trial_str}"
 
 
 def read_sensor_csv(path: Path) -> pd.DataFrame:
@@ -192,8 +210,17 @@ def load_trial(sensor_csv_path: Path, label_df: Optional[pd.DataFrame]) -> Parse
 def discover_trials(sensor_root: Path) -> list[Path]:
     """List all sensor CSV files under a KFall sensor_data root, sorted
     for reproducible iteration order.
+
+    Matches trial files by content (via TRIAL_FILENAME_RE) rather than a
+    glob pattern on the filename prefix, since at least one real-world
+    mirror uses a different filename convention than its own subject
+    folder names (see the naming-variant note above TRIAL_FILENAME_RE).
+    Relying on the regex here means any future naming quirk only needs
+    a fix in one place.
     """
-    return sorted(Path(sensor_root).glob("SA*/SA*T*R*.csv"))
+    sensor_root = Path(sensor_root)
+    candidates = sensor_root.glob("SA*/*.csv")
+    return sorted(p for p in candidates if TRIAL_FILENAME_RE.match(p.name))
 
 
 def load_all_trials(sensor_root: Path, label_root: Path) -> list[ParsedTrial]:

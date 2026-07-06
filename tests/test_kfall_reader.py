@@ -40,6 +40,23 @@ def test_parse_trial_filename_rejects_bad_pattern():
         parse_trial_filename("not_a_kfall_file.csv")
 
 
+def test_parse_trial_filename_accepts_dropped_a_variant():
+    # Real-world regression: at least one Kaggle mirror of KFall
+    # (usmanabbasi2002/kfall-dataset) names sensor CSVs "SxxTyyRzz.csv"
+    # (no "A") while keeping the parent folder as "SAxx". Confirmed by
+    # inspecting the mirror's actual file listing via the Kaggle API.
+    subject_id, task_id, trial_id = parse_trial_filename("S07T05R01.csv")
+    assert subject_id == "SA07"
+    assert task_id == 5
+    assert trial_id == "R01"
+
+
+def test_parse_trial_filename_both_variants_agree():
+    with_a = parse_trial_filename("SA07T05R01.csv")
+    without_a = parse_trial_filename("S07T05R01.csv")
+    assert with_a == without_a
+
+
 def test_fall_task_ids_boundaries():
     assert 22 in FALL_TASK_IDS
     assert 36 in FALL_TASK_IDS
@@ -51,7 +68,19 @@ def test_fall_task_ids_boundaries():
 def test_discover_trials_finds_both_fixture_files():
     found = discover_trials(SENSOR_ROOT)
     names = {p.name for p in found}
-    assert names == {"SA06T05R01.csv", "SA06T22R01.csv"}
+    # includes the SA07/S07T05R01.csv dropped-A fixture alongside the two
+    # standard-naming SA06 fixtures
+    assert names == {"SA06T05R01.csv", "SA06T22R01.csv", "S07T05R01.csv"}
+
+
+def test_discover_trials_and_load_handles_dropped_a_variant_end_to_end():
+    found = discover_trials(SENSOR_ROOT)
+    dropped_a_path = next(p for p in found if p.name == "S07T05R01.csv")
+
+    trial = load_trial(dropped_a_path, label_df=None)
+    assert trial.metadata.subject_id == "SA07"
+    assert trial.metadata.task_id == 5
+    assert trial.metadata.label == "adl"
 
 
 def test_read_sensor_csv_shape_and_columns():
@@ -104,10 +133,21 @@ def test_load_trial_without_label_df_still_works():
 
 def test_load_all_trials_end_to_end():
     trials = load_all_trials(SENSOR_ROOT, LABEL_ROOT)
-    assert len(trials) == 2
+    assert len(trials) == 3
 
-    by_task = {t.metadata.task_id: t for t in trials}
-    assert by_task[5].metadata.label == "adl"
-    assert by_task[22].metadata.label == "fall"
-    assert by_task[22].metadata.fall_onset_frame == 140
-    assert by_task[22].metadata.fall_impact_frame == 158
+    by_subject_task = {(t.metadata.subject_id, t.metadata.task_id): t for t in trials}
+
+    sa06_adl = by_subject_task[("SA06", 5)]
+    assert sa06_adl.metadata.label == "adl"
+
+    sa06_fall = by_subject_task[("SA06", 22)]
+    assert sa06_fall.metadata.label == "fall"
+    assert sa06_fall.metadata.fall_onset_frame == 140
+    assert sa06_fall.metadata.fall_impact_frame == 158
+
+    # SA07 has no label file in the fixtures and uses the dropped-A
+    # filename variant -- confirms load_all_trials handles both
+    # correctly in the same run.
+    sa07_adl = by_subject_task[("SA07", 5)]
+    assert sa07_adl.metadata.label == "adl"
+    assert sa07_adl.metadata.fall_onset_frame is None
