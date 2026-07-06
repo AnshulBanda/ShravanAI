@@ -120,35 +120,91 @@ def read_sensor_csv(path: Path) -> pd.DataFrame:
     return df[_SIGNAL_COLUMN_ORDER].reset_index(drop=True)
 
 
+_TASK_CODE_T_RE = re.compile(r"^T(\d+)$", re.IGNORECASE)
+_TASK_CODE_F_RE = re.compile(r"^F(\d+)\s*\((\d+)\)$", re.IGNORECASE)
+
+
+def _resolve_official_task_id(raw_code) -> int:
+    """Convert a label sheet's task-code cell into the canonical KFall
+    task ID (an int, e.g. 22 for T22).
+
+    Real KFall label spreadsheets encode fall trials as "F01 (20)" --
+    neither the F-number nor the parenthetical number is the canonical
+    task ID used in sensor filenames (T22-T36). Cross-checking all 15
+    fall-type descriptions on a real SA06 label file against the
+    official KFall task descriptions confirmed: canonical task ID =
+    parenthetical_number + 2, holding the invariant
+    F_number + 19 == parenthetical_number across every row (verified,
+    not assumed). This also accepts a plain "T22" form directly, in
+    case some label file already uses canonical codes. Raises
+    ValueError on anything else, or if the invariant is violated --
+    both mean this mapping can't be trusted for whatever produced it,
+    which is worse to silently get wrong than to fail loudly on.
+    """
+    text = str(raw_code).strip()
+
+    t_match = _TASK_CODE_T_RE.match(text)
+    if t_match:
+        return int(t_match.group(1))
+
+    f_match = _TASK_CODE_F_RE.match(text)
+    if f_match:
+        f_number, paren_number = int(f_match.group(1)), int(f_match.group(2))
+        if f_number + 19 != paren_number:
+            raise ValueError(
+                f"Task code {raw_code!r} breaks the expected F-number/parenthetical "
+                f"relationship (expected parenthetical == F_number + 19) -- the "
+                f"canonical-task-ID mapping may not hold for this file; investigate "
+                f"before trusting it."
+            )
+        return paren_number + 2
+
+    raise ValueError(f"Unrecognized task code format in label sheet: {raw_code!r}")
+
+
 def read_label_file(path: Path) -> pd.DataFrame:
     """Parse a KFall per-subject label Excel file.
 
-    Column names are normalized (lowercased, spaces -> underscores)
-    rather than assumed verbatim, since the exact header text hasn't
-    been confirmed against a real KFall label file yet in this repo --
-    verify column names the first time this runs against real data, and
-    tighten `_find_label_columns` below if the heuristic matching in
-    there picks the wrong column.
+    Column names are normalized (lowercased, spaces -> underscores).
+    Real KFall label sheets merge the task-code and description cells
+    across each task's repeated trial rows (Excel merged cells become
+    blank/NaN on every row after the first when read via pandas) --
+    those two columns are forward-filled here so every row is usable
+    independently. A `resolved_task_id` column is added, mapping each
+    row's raw task code (whichever format it's in) to the canonical
+    KFall task ID -- see `_resolve_official_task_id`.
     """
     raw = pd.read_excel(path)
     raw.columns = [str(c).strip().lower().replace(" ", "_") for c in raw.columns]
+
+    task_cols = [c for c in raw.columns if "task" in c]
+    if not task_cols:
+        return raw
+
+    task_col = task_cols[0]
+    raw[task_col] = raw[task_col].ffill()
+
+    desc_cols = [c for c in raw.columns if "description" in c]
+    if desc_cols:
+        raw[desc_cols[0]] = raw[desc_cols[0]].ffill()
+
+    resolved: list = []
+    errors: list = []
+    for idx, code in raw[task_col].items():
+        try:
+            resolved.append(_resolve_official_task_id(code))
+        except ValueError as exc:
+            errors.append(f"row {idx}: {exc}")
+            resolved.append(None)
+
+    if errors:
+        raise ValueError(
+            "Failed to resolve task code(s) in label file "
+            f"{path.name}:\n" + "\n".join(errors)
+        )
+
+    raw["resolved_task_id"] = resolved
     return raw
-
-
-def _find_label_columns(label_df: pd.DataFrame) -> Optional[tuple[str, str, str, str]]:
-    """Heuristically locate (task_col, trial_col, onset_col, impact_col) by
-    substring match on normalized column names. Returns None if any are
-    missing, so callers can fail soft rather than throw on unexpected
-    ADL-only label sheets.
-    """
-    task_cols = [c for c in label_df.columns if "task" in c]
-    trial_cols = [c for c in label_df.columns if "trial" in c]
-    onset_cols = [c for c in label_df.columns if "onset" in c]
-    impact_cols = [c for c in label_df.columns if "impact" in c]
-
-    if not (task_cols and trial_cols and onset_cols and impact_cols):
-        return None
-    return task_cols[0], trial_cols[0], onset_cols[0], impact_cols[0]
 
 
 def _label_lookup(
@@ -160,15 +216,26 @@ def _label_lookup(
     expected/correct outcome for ADL trials that have no onset/impact
     annotation at all.
     """
-    columns = _find_label_columns(label_df)
-    if columns is None:
+    if "resolved_task_id" not in label_df.columns:
         return None, None
-    task_col, trial_col, onset_col, impact_col = columns
 
-    task_str = f"T{task_id:02d}"
+    trial_cols = [c for c in label_df.columns if "trial" in c]
+    onset_cols = [c for c in label_df.columns if "onset" in c]
+    impact_cols = [c for c in label_df.columns if "impact" in c]
+    if not (trial_cols and onset_cols and impact_cols):
+        return None, None
+    trial_col, onset_col, impact_col = trial_cols[0], onset_cols[0], impact_cols[0]
+
+    # trial_id arrives here as "R01" (parsed from the sensor filename);
+    # real label sheets store it as a plain integer repetition number.
+    trial_num_match = re.match(r"R?0*(\d+)", trial_id, re.IGNORECASE)
+    if not trial_num_match:
+        return None, None
+    trial_num = int(trial_num_match.group(1))
+
     matches = label_df[
-        label_df[task_col].astype(str).str.upper().str.strip().isin([task_str, str(task_id)])
-        & label_df[trial_col].astype(str).str.upper().str.strip().str.contains(trial_id, na=False)
+        (label_df["resolved_task_id"] == task_id)
+        & (pd.to_numeric(label_df[trial_col], errors="coerce") == trial_num)
     ]
     if matches.empty:
         return None, None

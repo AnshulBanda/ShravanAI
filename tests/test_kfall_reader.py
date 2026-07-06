@@ -15,6 +15,8 @@ import pytest
 
 from shared.io.readers_kfall import (
     FALL_TASK_IDS,
+    _label_lookup,
+    _resolve_official_task_id,
     discover_trials,
     load_all_trials,
     load_trial,
@@ -97,11 +99,45 @@ def test_read_sensor_csv_shape_and_columns():
     assert abs(df["acc_z"].mean() - 1.0) < 0.1
 
 
-def test_read_label_file_normalizes_columns():
+def test_resolve_official_task_id_handles_f_code_format():
+    assert _resolve_official_task_id("F01 (20)") == 22
+    assert _resolve_official_task_id("F15 (34)") == 36
+
+
+def test_resolve_official_task_id_handles_plain_t_code():
+    assert _resolve_official_task_id("T22") == 22
+    assert _resolve_official_task_id("t05") == 5
+
+
+def test_resolve_official_task_id_rejects_broken_invariant():
+    # F01 paired with a parenthetical that does NOT satisfy
+    # F_number + 19 == parenthetical -- should fail loudly rather than
+    # silently produce a wrong canonical task ID.
+    with pytest.raises(ValueError, match="parenthetical"):
+        _resolve_official_task_id("F01 (99)")
+
+
+def test_resolve_official_task_id_rejects_garbage():
+    with pytest.raises(ValueError):
+        _resolve_official_task_id("not a task code")
+
+
+def test_read_label_file_normalizes_columns_and_resolves_task_id():
     label_df = read_label_file(LABEL_ROOT / "SA06_label.xlsx")
     assert "fall_onset_frame" in label_df.columns
     assert "fall_impact_frame" in label_df.columns
-    assert "task_code" in label_df.columns
+    assert "resolved_task_id" in label_df.columns
+    # F01 (20) -> canonical task 22, per _resolve_official_task_id
+    assert label_df["resolved_task_id"].iloc[0] == 22
+
+
+def test_read_label_file_forward_fills_merged_cells():
+    label_df = read_label_file(LABEL_ROOT / "SA06_label.xlsx")
+    task_col = [c for c in label_df.columns if "task" in c][0]
+    # every row should have a resolved code after ffill, not just the
+    # first row of each merged block
+    assert label_df[task_col].isna().sum() == 0
+    assert label_df["resolved_task_id"].isna().sum() == 0
 
 
 def test_load_trial_adl_has_no_onset_impact():
@@ -121,6 +157,21 @@ def test_load_trial_fall_has_onset_impact_from_label_sheet():
     assert trial.metadata.fall_onset_frame == 140
     assert trial.metadata.fall_impact_frame == 158
     assert trial.metadata.trial_id == "R01"
+
+
+def test_label_lookup_handles_missing_repetition():
+    # The fixture's F02 (21) -> task 23 block deliberately omits trial 3,
+    # mirroring the documented real-world quirk where some KFall task
+    # folders have 4 trials instead of 5. Trial 3 should resolve to
+    # (None, None) rather than erroring or matching the wrong row.
+    label_df = read_label_file(LABEL_ROOT / "SA06_label.xlsx")
+    onset, impact = _label_lookup(label_df, task_id=23, trial_id="R03")
+    assert onset is None
+    assert impact is None
+    # but trial 4 (present in the fixture) should resolve correctly
+    onset4, impact4 = _label_lookup(label_df, task_id=23, trial_id="R04")
+    assert onset4 == 130
+    assert impact4 == 167
 
 
 def test_load_trial_without_label_df_still_works():
