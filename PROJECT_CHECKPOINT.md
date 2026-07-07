@@ -1,6 +1,6 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.3 (band-pass filtering)
+Last updated: after Stage 3, Task 3.6 (group-average calibration fallback)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -115,16 +115,86 @@ Commit: "Add Butterworth band-pass filtering (0.5-20 Hz) module"
 confirm current count matches before trusting this number blindly; it
 should only grow from here.
 
-#### Next up: Task 3.4 — Stationary-segment detector
-Not yet started as of this checkpoint. Generic function to find a quiet
-window in a signal via rolling acceleration-variance and gyro-magnitude
-thresholds -- used both for validating T01 and for the standing-initiated-
-trial auto-detect fallback (Task 3.5).
+#### Task 3.4 — COMPLETE
+`shared/harmonize/stationarity.py`: `detect_stationary_segment(signal,
+sample_rate_hz, min_duration_s=2.0, accel_var_threshold=0.01,
+gyro_mag_threshold=5.0)`. Finds the longest contiguous window where
+rolling acceleration variance and gyro magnitude both stay below
+threshold for at least `min_duration_s`; returns `(start_idx, end_idx)`
+or `None` if nothing qualifies. Picks the LONGEST qualifying window when
+multiple exist (tested explicitly). Off-by-one-or-two-sample edge fuzz
+on detected boundaries is expected/normal rolling-window behavior, not a
+bug -- confirmed via manual check (true segment `[100,400)`, detected
+`(99,401)`).
+Tests: `tests/test_stationarity.py` (6 tests). Commit: "Add generic
+stationary-segment detector"
 
-#### Remaining after that: 3.5 (per-subject calibration), 3.6
-(group-average fallback), 3.7 (harmonization orchestrator), 3.8
-(validation checks), 3.9 (provenance writer), 3.10 (end-to-end KFall
-harmonization script), 3.11 (visual QA).
+#### Task 3.5 — COMPLETE
+`shared/harmonize/axis_alignment.py`: `compute_gravity_rotation(accel_segment)`
+(Rodrigues-formula rotation aligning mean gravity direction to canonical
+vertical `[0,0,1]`, handles near-parallel/antiparallel degenerate cases),
+`apply_rotation(signal, rotation)` (rotates BOTH acc_* and gyro_* columns
+consistently, since both are vectors in the same sensor frame),
+`calibrate_subject(trials, standing_initiated_task_ids=..., ...)`
+(T01-preferred calibration; only trusts T01 if the Task 3.4 detector
+confirms stillness for >= `t01_min_coverage_fraction` [default 0.5] of
+the trial, else falls through to auto-detect on a standing-initiated
+trial: T02, T06-T09, T20-T21 -- sit/lie-down tasks like T11 are
+deliberately excluded from the fallback set, since seated/reclined tilt
+differs from standing tilt). Returns `None` if nothing usable (Task
+3.6's job to fill that gap). Module is dataset-agnostic (only needs
+`.signal`/`.metadata.task_id`, doesn't import KFall's reader directly)
+so this same logic applies unchanged to SisFall/FallAllD later.
+
+**Validated against the real SA06 finding** (fact #3 below): a
+synthetic signal reproducing gravity-on-acc_y-at-(-1.0) was correctly
+rotated so gravity moved to acc_z ≈ 0.999, acc_x/acc_y ≈ 0 -- confirms
+the calibration does what it's designed to do, not just that it passes
+synthetic unit tests.
+
+Tests: `tests/test_axis_alignment.py` (12 tests, including the
+exact-antiparallel degenerate case and the "T01 exists but subject was
+fidgety, correctly falls through to auto-detect" case). Commit: "Add
+per-subject gravity-alignment calibration with T01/auto-detect fallback"
+
+#### Task 3.6 — COMPLETE
+Extended `shared/harmonize/axis_alignment.py`:
+`resolve_group_fallback(per_subject: dict[str, Optional[CalibrationResult]])`
+-- fills in `None` entries using the average of successfully-calibrated
+subjects' NORMALIZED gravity directions, re-running
+`compute_gravity_rotation` on that average; tags result `source="group_fallback"`.
+Raises `ValueError` if every subject in the batch is `None` (nothing to
+average from). Also added `summarize_calibration_sources(resolved)` --
+one-line count-per-source helper for the human sanity check ("is
+group_fallback rare, as it should be").
+
+**Bug caught in my own test, not the code**: an early test assumed the
+group-averaged rotation should map the averaged gravity vector to
+EXACTLY magnitude 1.0 -- this failed, correctly, because averaging two
+non-identical unit vectors mathematically produces a vector shorter
+than 1 (basic vector geometry). Fixed the test to check alignment
+(x/y components vanish) rather than an incorrect magnitude assumption.
+Worth remembering if a similar "slightly under 1.0" number shows up
+later in real data -- not automatically a bug.
+
+Tests: `tests/test_axis_alignment_group_fallback.py` (6 tests).
+Commit: "Add group-average calibration fallback for subjects with no
+usable stationary segment"
+
+**Current total test count: 66 passed** -- run `pytest tests/ -v` to
+confirm current count matches before trusting this number blindly; it
+should only grow from here.
+
+#### Next up: Task 3.7 — Harmonization orchestrator
+Not yet started as of this checkpoint. Composes unit conversion →
+resample → axis alignment → filter into one per-trial function
+(`harmonize_trial(trial, calibration, config)`), using the four modules
+already built in Tasks 3.1-3.3 and 3.5/3.6.
+
+#### Remaining after that: 3.8 (validation checks), 3.9 (provenance
+writer), 3.10 (end-to-end KFall harmonization script -- this is where
+Tasks 3.4-3.6's calibration logic finally gets run against REAL KFall
+subjects for the first time, not just synthetic fixtures), 3.11 (visual QA).
 
 ---
 
@@ -200,11 +270,14 @@ that contradicts these, trust this checkpoint over a fresh guess:
    Python API (`KaggleApi().dataset_list_files(..., page_token=...)`)
    looped until no more pages, as done in `scripts/list_kfall_files.py`.
 
-6. **Not yet verified on real data**: the group-average calibration
-   fallback (Task 3.6) and the full harmonization pipeline (Tasks
-   3.3–3.11) haven't touched real data yet — only Stage 2 (reading) and
-   Task 3.1 (unit conversion, trivially a no-op for KFall) have been
-   confirmed end-to-end against real files so far.
+6. **Not yet verified on real data**: Tasks 3.4-3.6 (stationary
+   detection, per-subject calibration, group-average fallback) are all
+   implemented and pass synthetic tests, but have NOT been run against
+   real KFall subjects yet -- that first happens in Task 3.10's
+   end-to-end script. Don't assume the `t01_min_coverage_fraction=0.5`
+   threshold or the `STANDING_INITIATED_TASK_IDS` set are well-tuned
+   for real subjects until that run happens. The full harmonization
+   orchestration (Tasks 3.7-3.9) also hasn't touched real data yet.
 
 ---
 
@@ -220,3 +293,15 @@ that contradicts these, trust this checkpoint over a fresh guess:
 - The "F-code + 19 invariant" was verified on SA06 only. Worth spot-checking
   at least one more subject's label file once more real data is pulled,
   in case some subjects' sheets differ.
+- The `t01_min_coverage_fraction` (0.5) and `STANDING_INITIATED_TASK_IDS`
+  (`{2,6,7,8,9,20,21}`) constants in `axis_alignment.py` are judgment
+  calls, not derived from real data. Worth revisiting once Task 3.10 runs
+  calibration against all 42 real KFall subjects and
+  `summarize_calibration_sources` shows how often each fallback tier
+  actually gets used in practice.
+- `resolve_group_fallback`'s assumption (sensor mounted the same way
+  across subjects in a study, so averaging others' gravity direction is
+  a reasonable stand-in) hasn't been checked against real data either --
+  worth a sanity look once Task 3.10 runs, if `group_fallback` ever
+  triggers on a real subject (expected to be rare, e.g. SA34 given its
+  documented full-data-loss issue).
