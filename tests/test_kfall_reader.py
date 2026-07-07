@@ -70,9 +70,13 @@ def test_fall_task_ids_boundaries():
 def test_discover_trials_finds_both_fixture_files():
     found = discover_trials(SENSOR_ROOT)
     names = {p.name for p in found}
-    # includes the SA07/S07T05R01.csv dropped-A fixture alongside the two
-    # standard-naming SA06 fixtures
-    assert names == {"SA06T05R01.csv", "SA06T22R01.csv", "S07T05R01.csv"}
+    # SA06T01R01 (added for Task 3.10's end-to-end calibration test) and
+    # S07T02R01 (added for Task 3.10's auto-detect end-to-end test) join
+    # the original three fixtures.
+    assert names == {
+        "SA06T01R01.csv", "SA06T05R01.csv", "SA06T22R01.csv",
+        "S07T02R01.csv", "S07T05R01.csv",
+    }
 
 
 def test_discover_trials_and_load_handles_dropped_a_variant_end_to_end():
@@ -184,9 +188,12 @@ def test_load_trial_without_label_df_still_works():
 
 def test_load_all_trials_end_to_end():
     trials = load_all_trials(SENSOR_ROOT, LABEL_ROOT)
-    assert len(trials) == 3
+    assert len(trials) == 5
 
     by_subject_task = {(t.metadata.subject_id, t.metadata.task_id): t for t in trials}
+
+    sa06_t01 = by_subject_task[("SA06", 1)]
+    assert sa06_t01.metadata.label == "adl"
 
     sa06_adl = by_subject_task[("SA06", 5)]
     assert sa06_adl.metadata.label == "adl"
@@ -202,3 +209,6 @@ def test_load_all_trials_end_to_end():
     sa07_adl = by_subject_task[("SA07", 5)]
     assert sa07_adl.metadata.label == "adl"
     assert sa07_adl.metadata.fall_onset_frame is None
+
+    sa07_t02 = by_subject_task[("SA07", 2)]
+    assert sa07_t02.metadata.label == "adl"
