@@ -156,3 +156,63 @@ def calibrate_subject(
             return _calibration_from_segment(trial.signal, start, end, source="auto_detected")
 
     return None
+
+
+def resolve_group_fallback(
+    per_subject: dict[str, Optional[CalibrationResult]],
+) -> dict[str, CalibrationResult]:
+    """Fill in calibration for any subject where `calibrate_subject`
+    returned None, using the average gravity direction across subjects
+    who DID calibrate successfully (T01 or auto-detected).
+
+    Assumes the sensor is mounted the same way across subjects in a
+    given study protocol, so the average of everyone else's measured
+    gravity direction is a reasonable stand-in for a subject with no
+    usable stationary segment of their own -- a coarse approximation,
+    which is exactly why this is the last-resort tier, not a first
+    choice. Subjects already calibrated are returned unchanged.
+
+    Raises ValueError if every subject is None (nothing to average from).
+    """
+    valid = {sid: cal for sid, cal in per_subject.items() if cal is not None}
+    missing = {sid: cal for sid, cal in per_subject.items() if cal is None}
+
+    if not missing:
+        return dict(per_subject)
+
+    if not valid:
+        raise ValueError(
+            "Cannot resolve group-average fallback: no subjects in this "
+            "batch have a valid per-subject calibration to average from."
+        )
+
+    directions = np.array([
+        cal.gravity_vector / np.linalg.norm(cal.gravity_vector)
+        for cal in valid.values()
+    ])
+    mean_direction = directions.mean(axis=0)
+
+    group_rotation = compute_gravity_rotation(mean_direction.reshape(1, -1))
+
+    resolved = dict(valid)
+    for subject_id in missing:
+        resolved[subject_id] = CalibrationResult(
+            rotation=group_rotation,
+            source="group_fallback",
+            gravity_vector=mean_direction,
+        )
+    return resolved
+
+
+def summarize_calibration_sources(resolved: dict[str, CalibrationResult]) -> dict[str, int]:
+    """One-line-summary helper: counts of each calibration source across
+    a resolved (post-group-fallback) set of subjects. Intended for the
+    human sanity check called for in the Stage 3 sprint plan -- if
+    `group_fallback` is common rather than rare, something upstream
+    (T01 parsing, or the stationarity thresholds) likely needs attention
+    before trusting the harmonized output.
+    """
+    counts: dict[str, int] = {}
+    for cal in resolved.values():
+        counts[cal.source] = counts.get(cal.source, 0) + 1
+    return counts
