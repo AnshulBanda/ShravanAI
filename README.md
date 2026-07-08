@@ -10,13 +10,9 @@ not inside it) for the full design rationale.
       logger with wandb-or-local fallback (`shared/tracking/logger.py`)
 - [x] Stage 2 — KFall reader (`shared/io/readers_kfall.py`), verified
       against real data, not just fixtures (`tests/test_kfall_reader.py`)
-- [x] Stage 3, Tasks 3.1-3.10 — KFall harmonization pipeline (units,
-      resampling, filtering, axis alignment, orchestration, validation,
-      provenance-aware writer), run end-to-end against real KFall data
-- [ ] Stage 3, Task 3.11 — visual QA script written
-      (`notebooks/stage3_visual_qa.py`), smoke-tested against fixtures,
-      but not yet run against real data by a human -- do that before
-      calling Stage 3 done
+- [x] Stage 3, Tasks 3.1-3.11 — KFall harmonization pipeline complete,
+      including the visual QA pass run against real data. Stage 3 is
+      done for KFall.
 - [ ] Stage 4 — manifest builder (extends the minimal `shared/manifest.py`
       already added in Task 3.10 into the full cross-dataset manifest)
 - [ ] Stage 5+ — SisFall harmonization, then FallAllD -- see blueprint

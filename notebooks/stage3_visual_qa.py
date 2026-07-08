@@ -114,7 +114,18 @@ def _plot_raw_vs_harmonized(trial, harmonized: pd.DataFrame, out_path: Path) -> 
 
 
 def _impact_frame_check(trial, harmonized: pd.DataFrame) -> Optional[dict]:
-    """Peak-magnitude frame near the labeled impact vs. the label itself."""
+    """Peak-magnitude frame near the labeled impact vs. the label itself.
+
+    Reports BOTH the combined 3-axis magnitude peak AND each individual
+    axis's own peak, because these can legitimately disagree by tens of
+    frames on the same trial. E.g. a forward fall's dominant
+    deceleration is horizontal (acc_x), which can peak several hundred
+    ms BEFORE the vertical ground-contact transient (acc_z) that a human
+    labeler may have keyed the "impact" frame to -- both are real
+    physical events in the same fall, not a bug in one or the other.
+    Don't treat a large offset on the combined-magnitude peak alone as
+    a red flag without checking which axis is driving it.
+    """
     meta = trial.metadata
     if meta.label != "fall" or meta.fall_impact_frame is None:
         return None
@@ -134,17 +145,30 @@ def _impact_frame_check(trial, harmonized: pd.DataFrame) -> Optional[dict]:
     if lo >= hi:
         return None
 
-    local_peak_idx = lo + int(np.argmax(magnitude[lo:hi]))
-
-    return {
+    result = {
         "subject_id": meta.subject_id,
         "activity_code": meta.activity_code,
         "trial_id": meta.trial_id,
         "labeled_onset_frame": meta.fall_onset_frame,
         "labeled_impact_frame": meta.fall_impact_frame,
-        "detected_peak_frame": local_peak_idx,
-        "frame_offset": local_peak_idx - center,
     }
+
+    magnitude_peak_idx = lo + int(np.argmax(magnitude[lo:hi]))
+    result["magnitude_peak_frame"] = magnitude_peak_idx
+    result["magnitude_peak_offset"] = magnitude_peak_idx - center
+
+    # Per-axis peak (largest absolute value), so a human can tell which
+    # axis is driving the combined-magnitude peak and whether a
+    # different axis lines up more closely with the labeled impact.
+    for i, col in enumerate(ACCEL_COLUMNS):
+        axis_window = accel[lo:hi, i]
+        axis_peak_local = int(np.argmax(np.abs(axis_window)))
+        axis_peak_idx = lo + axis_peak_local
+        result[f"{col}_peak_frame"] = axis_peak_idx
+        result[f"{col}_peak_offset"] = axis_peak_idx - center
+        result[f"{col}_peak_value"] = float(axis_window[axis_peak_local])
+
+    return result
 
 
 def main() -> None:
@@ -257,14 +281,21 @@ def main() -> None:
         impact_df = pd.DataFrame(impact_checks)
         impact_path = OUTPUT_DIR / "impact_frame_check.csv"
         impact_df.to_csv(impact_path, index=False)
-        print("\nFall trials: labeled impact frame vs. detected peak-magnitude frame")
+        print(
+            "\nFall trials: labeled impact frame vs. detected peak frames "
+            "(combined-magnitude and per-axis)"
+        )
         print(impact_df.to_string(index=False))
         print(f"\nImpact-frame check written to {impact_path}")
         print(
-            "A small negative/positive frame_offset (a few frames) is "
-            "expected and matches the earlier manual SA06 T22 check "
-            "(detected 202 vs. labeled 208, offset -6). Large offsets "
-            "(tens of frames) on a new subject/trial are worth a manual look."
+            "Read this by eye against the saved plot, not just the offset "
+            "number: the combined-magnitude peak and a given axis's own "
+            "peak can legitimately land tens of frames apart on the SAME "
+            "trial -- e.g. a forward fall's horizontal deceleration "
+            "(acc_x) can peak well before the vertical ground-contact "
+            "transient (acc_z) that the label may be keyed to. A large "
+            "offset only needs a closer look if the plot does NOT show a "
+            "clear, fall-like transient anywhere near the labeled window."
         )
     else:
         print(

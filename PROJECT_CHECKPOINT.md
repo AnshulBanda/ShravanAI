@@ -1,8 +1,7 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.11 (visual QA script written and
-smoke-tested against fixtures; NOT yet run against real data by a
-human -- see Task 3.11 section below)
+Last updated: after Stage 3, Task 3.11 (visual QA script, run against
+real SA06 data by a human -- Stage 3 is now complete for KFall)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -321,7 +320,7 @@ SA06 is downloaded and it has a working T01). Re-run
 `calibration_source_counts` in the printed summary -- `group_fallback`
 should stay rare, per the design intent.
 
-#### Task 3.11 — SCRIPT WRITTEN, NOT YET RUN AGAINST REAL DATA
+#### Task 3.11 — COMPLETE (run against real data, script since improved)
 `notebooks/stage3_visual_qa.py`: one-off exploratory script (not
 imported by anything, no unit tests, by design). Reuses Task 3.10's
 two-pass calibration logic directly (rather than importing
@@ -330,34 +329,54 @@ script should never touch that), then for a handful of trials per
 subject: harmonizes, plots raw-vs-harmonized overlays to
 `results/stage3_visual_qa/<subject>_<activity>_<trial>.png`, prints and
 saves a calibration-source count table, and for every fall trial in the
-QA set, compares the labeled impact frame to the frame of peak
-harmonized-signal magnitude (extending the manual SA06 T22 check to
-whatever other fall trials are available -- currently just SA06, since
-that's the only subject downloaded so far). Degrades gracefully to
-whatever subjects are present -- `--subjects`/`--max-trials-per-subject`
-flags exist but aren't required.
+QA set, compares the labeled impact frame to detected peak frames near
+it. Degrades gracefully to whatever subjects are present --
+`--subjects`/`--max-trials-per-subject` flags exist but aren't required.
 
-**Smoke-tested (not real-data-tested)**: this was run and debugged
-against the repo's own synthetic `tests/fixtures/kfall_mock/` data
-(temporarily copied to `data/raw/kfall/`, then removed -- not committed)
-just to confirm the script runs end-to-end without crashing. Caught and
-fixed one real bug this way: the first draft's trial de-duplication used
-`t not in picks`, which raises `ValueError: The truth value of a
-DataFrame is ambiguous` because `ParsedTrial` holds a DataFrame field --
-fixed to compare by `id()` instead. On the fixture stand-in, output
-looked exactly as expected (harmonized panel shows no persistent DC
-gravity bias, matching Task 3.7's finding; SA06 T22's fixture fall trial
-showed a small single-digit frame offset between labeled and detected
-impact).
+**Real-data run (SA06, T01 + T22)**:
+- T01 (calibration trial, ADL): raw shows gravity on `acc_y` at ~-1.0g
+  (matches the documented real-mounting quirk); harmonized shows no
+  bias on any axis, just low-amplitude noise (~+/-0.02g) -- exactly the
+  expected shape of a correctly-calibrated, genuinely-still trial.
+- T22 (real fall, labeled `fall_onset_frame=130, fall_impact_frame=208`):
+  the harmonized signal's COMBINED 3-axis magnitude peaks at frame 192
+  (offset -16 from the labeled impact) -- notably different from the
+  frame-202 (offset -6) found by the earlier Task 3.10 manual check,
+  which specifically tracked `acc_z`. Investigated by eye against the
+  saved plot: this is NOT a bug. `acc_x` (horizontal deceleration) has
+  the largest overall peak (~+2.15g at frame ~192), while `acc_z`
+  (vertical, ground-contact) has its own separate, smaller peak
+  (~-1.2g) closer to frame ~202-205, right near the labeled impact.
+  This matches the already-documented finding that T22 is a FORWARD
+  fall with horizontal deceleration dominant over vertical -- the
+  combined-magnitude peak simply locks onto the earlier, larger
+  horizontal transient rather than the later vertical one. Both are
+  real physical events within the same fall, a few hundred ms apart.
 
-**Not yet done**: an actual run against real KFall data with the real
-output eyeballed by a human. Run `python notebooks/stage3_visual_qa.py`
-locally against your real `data/raw/kfall/` and look at the PNGs and
-`impact_frame_check.csv` under `results/stage3_visual_qa/` before
-considering Stage 3 fully closed. Re-run again as more real subjects
-(beyond SA06) get downloaded -- widening the impact-frame check and
-finally exercising `auto_detected`/`group_fallback` calibration tiers on
-real data, which haven't been touched by real data yet (see note above).
+**Script improved as a result of this finding**: `_impact_frame_check`
+now reports the peak frame/offset/value for EACH axis individually, not
+just the combined-magnitude peak -- so a human can see at a glance
+which axis is driving a given peak and whether a different axis lines
+up more closely with the labeled frame, instead of one number silently
+conflating two different physical events. Also removed a static
+"matches the earlier check" message that had been asserting agreement
+without actually checking it — that message would have been actively
+wrong on real T22 data and was itself a checkpoint-writing mistake
+worth remembering, not just a code bug.
+
+**Smoke-tested against fixtures too**: run against the repo's own
+synthetic `tests/fixtures/kfall_mock/` data (temporarily copied to
+`data/raw/kfall/`, then removed -- not committed) to confirm the script
+runs end-to-end without crashing, both before and after the per-axis
+change. Caught and fixed one real bug this way: the first draft's trial
+de-duplication used `t not in picks`, which raises `ValueError: The
+truth value of a DataFrame is ambiguous` because `ParsedTrial` holds a
+DataFrame field -- fixed to compare by `id()` instead.
+
+**Still open**: only SA06 has been downloaded so far, so
+`auto_detected`/`group_fallback` calibration tiers and the impact-frame
+check on other subjects/fall types remain untested on real data --
+re-run this script as more real subjects are downloaded.
 
 This is the last Stage 3 item before Stage 4 (manifest builder --
 `shared/manifest.py` already exists in minimal form from Task 3.10;
