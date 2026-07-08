@@ -1,6 +1,6 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.6 (group-average calibration fallback)
+Last updated: after Stage 3, Task 3.10 (end-to-end KFall harmonization script)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -185,16 +185,153 @@ usable stationary segment"
 confirm current count matches before trusting this number blindly; it
 should only grow from here.
 
-#### Next up: Task 3.7 — Harmonization orchestrator
-Not yet started as of this checkpoint. Composes unit conversion →
-resample → axis alignment → filter into one per-trial function
-(`harmonize_trial(trial, calibration, config)`), using the four modules
-already built in Tasks 3.1-3.3 and 3.5/3.6.
+#### Task 3.7 — COMPLETE
+`shared/harmonize/pipeline.py`: `HarmonizationConfig` dataclass
+(target_rate_hz=100.0, filter_low_hz=0.5, filter_high_hz=20.0,
+filter_order=4) and `harmonize_trial(trial, calibration, config)`,
+composing unit conversion -> resample -> axis alignment -> filter in
+that order. Output is channel-restricted to exactly `time_s` +
+acc_*/gyro_* (drops KFall's Euler columns -- callers wanting those for
+a KFall-only experiment should read `trial.signal` directly before
+harmonization, not the harmonized output).
 
-#### Remaining after that: 3.8 (validation checks), 3.9 (provenance
-writer), 3.10 (end-to-end KFall harmonization script -- this is where
-Tasks 3.4-3.6's calibration logic finally gets run against REAL KFall
-subjects for the first time, not just synthetic fixtures), 3.11 (visual QA).
+**Critical, non-obvious finding from this task**: because gravity is a
+0 Hz/DC signal, and the filter runs AFTER alignment, the final
+harmonized output does NOT retain a persistent ~1g bias on any axis --
+the band-pass filter removes it by design (same as it removes postural
+drift). This means the "calibration sanity" check envisioned in the
+original sprint plan (checking ~1g/~0g on the final signal) is not
+physically checkable post-filter -- Task 3.8 checks the calibration
+object's own rotation-applied-to-its-recorded-gravity-vector instead,
+which is filter-independent. **Don't be alarmed by an absent gravity
+bias in harmonized output -- that's correct, not a bug.**
+
+Tests: `tests/test_pipeline.py` (5 tests, including a monkeypatch-based
+call-order regression test, and a test proving alignment's effect
+survives filtering by tracking a movement-frequency component rather
+than the (removed) DC gravity bias). Commit: "Add harmonization
+orchestrator composing unit conversion, resampling, alignment, and filtering"
+
+#### Task 3.8 — COMPLETE
+`shared/harmonize/validation.py`: `validate_harmonized_trial(signal,
+metadata, calibration, expected_rate_hz, expected_duration_range_s=None)
+-> list[str]`. Checks: schema, NaN/Inf, timing integrity, physical
+plausibility (max ~20g bound + flatline/std-near-zero detection),
+calibration sanity (via the calibration object itself, per the Task 3.7
+finding above -- NOT the final signal), duration-vs-protocol (optional,
+skipped if no range given -- kept dataset-agnostic rather than
+hardcoding KFall's per-task duration table into a shared module), and
+fall-trial label consistency (onset < impact <= signal length).
+
+**Deviation from sprint plan's literal API**: takes the full
+`calibration: CalibrationResult` object, not just a `calibration_source`
+string, specifically so the calibration-sanity check can be computed
+correctly (see Task 3.7 finding).
+
+Tests: `tests/test_validation.py` (15 tests, one per failure mode).
+Commit: "Add harmonized-trial validation checks"
+
+#### Task 3.9 — COMPLETE
+`shared/harmonize/writer.py`: `write_harmonized_trial(signal, metadata,
+calibration_source, issues, harmonized_root, quarantine_root,
+provenance_extra=None) -> Path`. Writes parquet + a sidecar JSON
+(chosen over parquet's internal metadata API for simplicity/inspectability)
+containing dataset/subject/activity/trial IDs, label, onset/impact
+frames, calibration_source, `accepted` bool, and the issues list.
+Routes to `harmonized_root/<dataset>/` if no issues, else
+`quarantine_root/<dataset>/`. Filename stem:
+`<subject_id>_<activity_code>_<trial_id>`.
+
+Tests: `tests/test_writer.py` (6 tests, including a round-trip value
+check and a provenance-content check). Commit: "Add provenance-aware
+harmonized trial writer with quarantine routing"
+
+#### Task 3.10 — COMPLETE
+`shared/manifest.py` (new, minimal): `ManifestRow` dataclass +
+`write_manifest`/`load_manifest` (parquet-backed). `shared/harmonize/orchestration.py`
+(new): `HarmonizationSummary` dataclass + `run_harmonization(dataset,
+sensor_root, label_root, harmonized_root, quarantine_root,
+harmonization_config, manifest_path=None) -> HarmonizationSummary` --
+loads all trials for a dataset, does two-pass calibration (per-subject
+via `calibrate_subject`, then `resolve_group_fallback` for gaps),
+harmonizes/validates/writes every trial, returns a summary. `scripts/harmonize_dataset.py`
+(new): thin CLI wrapper (`python scripts/harmonize_dataset.py --dataset kfall`),
+resolves paths from `configs/datasets/kfall.yaml` + `configs/base.yaml`,
+calls `run_harmonization`, prints the summary.
+
+**Deviation from sprint plan's literal file placement**: the plan put
+`run_harmonization` directly in `scripts/harmonize_dataset.py`. Moved
+the actual logic to `shared/harmonize/orchestration.py` instead, keeping
+the script as a thin wrapper -- consistent with this repo's own
+"scripts hold no logic" convention, which the plan's literal wording
+would have violated.
+
+Test fixtures extended: added a real `SA06T01R01.csv` fixture (the
+original Stage 2 fixtures never actually included one -- caught before
+it silently made the end-to-end test exercise `group_fallback` instead
+of the intended T01 path) and a `S07T02R01.csv` fixture (standing-
+initiated, quiet start) so SA07's auto-detect fallback is genuinely
+exercised end-to-end, not just in isolation.
+
+Tests: `tests/test_manifest.py` (2), `tests/test_orchestration.py` (6,
+including one confirming BOTH the T01 and auto_detected tiers fire
+together in one run, with `group_fallback` correctly absent). Also
+updated `tests/test_kfall_reader.py` for the two new fixture files (5
+trials total now, was 3). Commit: "Add end-to-end KFall harmonization
+script with summary reporting"
+
+**Current total test count: 100 passed** -- run `pytest tests/ -v` to
+confirm current count matches before trusting this number blindly; it
+should only grow from here.
+
+---
+
+## REAL-DATA MILESTONE: Task 3.10 run against actual KFall files (SA06, T01 + T22)
+
+This is the first time the full harmonization pipeline (Stages 2+3
+combined) has been run against real KFall data, not synthetic fixtures.
+Ran `python scripts/harmonize_dataset.py --dataset kfall` against
+SA06's real T01 and T22 R01 trials (the only two downloaded so far).
+
+**Result: fully successful, verified in detail, not just "it ran without
+erroring":**
+- Both trials: `accepted=True`, `calibration_source=T01`, 0 quarantined.
+- Harmonized `acc_z` mean ~0 (confirms the Task 3.7 finding holds on
+  real data too -- gravity DC correctly removed, not a bug).
+- **The real fall's impact signature was traced precisely**: T22 R01's
+  real labeled `fall_onset_frame=130, fall_impact_frame=208`. The
+  harmonized signal's largest `acc_z` swing (-1.307g) occurs at frame
+  202 -- 6 frames before the labeled impact, well inside the onset-
+  impact window, with the signal visibly transitioning from calm
+  (~130-185) to violently oscillating (~187 onward) before the sharp
+  transient. `acc_x`'s peak (2.16g) was actually larger than `acc_z`'s
+  in this window -- consistent with T22 being a FORWARD fall (dominant
+  deceleration is horizontal, not vertical), not a red flag.
+- This is the strongest evidence yet, on real data, that the full
+  chain (real onset/impact labels -> real axis alignment correcting
+  the actual sensor mounting tilt -> real band-pass filtering) works
+  as designed.
+
+**Not yet tested on real data**: `auto_detected` and `group_fallback`
+calibration tiers (only `T01` has fired on real data so far, since only
+SA06 is downloaded and it has a working T01). Re-run
+`harmonize_dataset.py` as more real subjects are downloaded and watch
+`calibration_source_counts` in the printed summary -- `group_fallback`
+should stay rare, per the design intent.
+
+#### Next up: Task 3.11 — Visual QA pass (human-in-the-loop, not automated)
+Not yet started as of this checkpoint. One-off exploratory script
+(`notebooks/stage3_visual_qa.py`), not imported by anything, no unit
+tests by design. Should show raw-vs-harmonized overlays across several
+real subjects/activities, a calibration-source histogram across all
+real KFall subjects, and confirm at least one more real fall trial's
+impact frame shows a visible spike (extending the manual check already
+done above for SA06 T22 to other subjects/trials once more are
+downloaded). This is the last Stage 3 item before Stage 4 (manifest
+builder -- note: `shared/manifest.py` already exists in minimal form
+from Task 3.10; Stage 4 is where it gets extended into the FULL
+cross-dataset manifest all pipelines will query against) and before
+extending harmonization to SisFall (Stage 5).
 
 ---
 
@@ -270,14 +407,16 @@ that contradicts these, trust this checkpoint over a fresh guess:
    Python API (`KaggleApi().dataset_list_files(..., page_token=...)`)
    looped until no more pages, as done in `scripts/list_kfall_files.py`.
 
-6. **Not yet verified on real data**: Tasks 3.4-3.6 (stationary
-   detection, per-subject calibration, group-average fallback) are all
-   implemented and pass synthetic tests, but have NOT been run against
-   real KFall subjects yet -- that first happens in Task 3.10's
-   end-to-end script. Don't assume the `t01_min_coverage_fraction=0.5`
-   threshold or the `STANDING_INITIATED_TASK_IDS` set are well-tuned
-   for real subjects until that run happens. The full harmonization
-   orchestration (Tasks 3.7-3.9) also hasn't touched real data yet.
+6. **Now verified on real data (as of Task 3.10)**: the full
+   harmonization pipeline (Stages 2+3 combined) has been run against
+   real SA06 T01 + T22 R01 files and confirmed correct in detail -- see
+   the "REAL-DATA MILESTONE" section above. Tasks 3.4-3.9's calibration/
+   harmonization/validation logic all fired correctly on real data, not
+   just synthetic fixtures. Still NOT yet tested on real data: the
+   `auto_detected` and `group_fallback` calibration tiers (only `T01`
+   has had a chance to fire, since only one real subject with a working
+   T01 is downloaded so far), and anything involving more than one real
+   subject at once.
 
 ---
 
@@ -295,13 +434,16 @@ that contradicts these, trust this checkpoint over a fresh guess:
   in case some subjects' sheets differ.
 - The `t01_min_coverage_fraction` (0.5) and `STANDING_INITIATED_TASK_IDS`
   (`{2,6,7,8,9,20,21}`) constants in `axis_alignment.py` are judgment
-  calls, not derived from real data. Worth revisiting once Task 3.10 runs
-  calibration against all 42 real KFall subjects and
-  `summarize_calibration_sources` shows how often each fallback tier
-  actually gets used in practice.
+  calls, not derived from real data. Worth revisiting once more real
+  subjects are downloaded and `calibration_source_counts` shows how
+  often each fallback tier actually gets used in practice.
 - `resolve_group_fallback`'s assumption (sensor mounted the same way
   across subjects in a study, so averaging others' gravity direction is
   a reasonable stand-in) hasn't been checked against real data either --
-  worth a sanity look once Task 3.10 runs, if `group_fallback` ever
-  triggers on a real subject (expected to be rare, e.g. SA34 given its
-  documented full-data-loss issue).
+  worth a sanity look once `group_fallback` triggers on a real subject
+  (expected to be rare, e.g. SA34 given its documented full-data-loss issue).
+- As more real KFall subjects get downloaded, rerun
+  `python scripts/harmonize_dataset.py --dataset kfall` periodically and
+  watch the `calibration_source_counts` breakdown -- this is the
+  ongoing real-world check that Tasks 3.4-3.6's fallback logic is
+  behaving as designed, not just working for SA06.
