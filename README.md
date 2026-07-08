@@ -1,21 +1,25 @@
-<<<<<<< HEAD
 # Fall Detection & Fall Prediction — Research Codebase
 
 Two independent pipelines sharing one harmonization/data layer. See
 `fall_project_implementation_blueprint.md` (kept alongside this repo,
 not inside it) for the full design rationale.
 
-## Status: Stage 1 + 2 complete
+## Status: Stage 3 nearly complete (see PROJECT_CHECKPOINT.md for full detail)
 
 - [x] Stage 1 — repo scaffold, config loader (`shared/config.py`), run
       logger with wandb-or-local fallback (`shared/tracking/logger.py`)
 - [x] Stage 2 — KFall reader (`shared/io/readers_kfall.py`), verified
-      against synthetic fixtures matching KFall's documented schema
-      (`tests/test_kfall_reader.py`)
-- [ ] Stage 3 — harmonization on KFall only (unit conversion, axis
-      alignment, resample, filter)
-- [ ] Stage 4 — manifest builder for KFall
-- [ ] Stage 5+ — see blueprint
+      against real data, not just fixtures (`tests/test_kfall_reader.py`)
+- [x] Stage 3, Tasks 3.1-3.10 — KFall harmonization pipeline (units,
+      resampling, filtering, axis alignment, orchestration, validation,
+      provenance-aware writer), run end-to-end against real KFall data
+- [ ] Stage 3, Task 3.11 — visual QA script written
+      (`notebooks/stage3_visual_qa.py`), smoke-tested against fixtures,
+      but not yet run against real data by a human -- do that before
+      calling Stage 3 done
+- [ ] Stage 4 — manifest builder (extends the minimal `shared/manifest.py`
+      already added in Task 3.10 into the full cross-dataset manifest)
+- [ ] Stage 5+ — SisFall harmonization, then FallAllD -- see blueprint
 
 ## Setup
 
@@ -77,6 +81,3 @@ data/raw/            Untouched dataset downloads (gitignored)
 data/harmonized/     Persisted harmonized continuous signals + manifest (gitignored)
 results/             Per-run logs/configs/checkpoints (gitignored)
 ```
-=======
-# ShravanAI
->>>>>>> b9692449f3ecc668e812bca5f1dfaea4fe95a2ca

@@ -1,6 +1,8 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.10 (end-to-end KFall harmonization script)
+Last updated: after Stage 3, Task 3.11 (visual QA script written and
+smoke-tested against fixtures; NOT yet run against real data by a
+human -- see Task 3.11 section below)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -319,19 +321,49 @@ SA06 is downloaded and it has a working T01). Re-run
 `calibration_source_counts` in the printed summary -- `group_fallback`
 should stay rare, per the design intent.
 
-#### Next up: Task 3.11 — Visual QA pass (human-in-the-loop, not automated)
-Not yet started as of this checkpoint. One-off exploratory script
-(`notebooks/stage3_visual_qa.py`), not imported by anything, no unit
-tests by design. Should show raw-vs-harmonized overlays across several
-real subjects/activities, a calibration-source histogram across all
-real KFall subjects, and confirm at least one more real fall trial's
-impact frame shows a visible spike (extending the manual check already
-done above for SA06 T22 to other subjects/trials once more are
-downloaded). This is the last Stage 3 item before Stage 4 (manifest
-builder -- note: `shared/manifest.py` already exists in minimal form
-from Task 3.10; Stage 4 is where it gets extended into the FULL
-cross-dataset manifest all pipelines will query against) and before
-extending harmonization to SisFall (Stage 5).
+#### Task 3.11 — SCRIPT WRITTEN, NOT YET RUN AGAINST REAL DATA
+`notebooks/stage3_visual_qa.py`: one-off exploratory script (not
+imported by anything, no unit tests, by design). Reuses Task 3.10's
+two-pass calibration logic directly (rather than importing
+`run_harmonization`, since that writes to `data/harmonized/` and this
+script should never touch that), then for a handful of trials per
+subject: harmonizes, plots raw-vs-harmonized overlays to
+`results/stage3_visual_qa/<subject>_<activity>_<trial>.png`, prints and
+saves a calibration-source count table, and for every fall trial in the
+QA set, compares the labeled impact frame to the frame of peak
+harmonized-signal magnitude (extending the manual SA06 T22 check to
+whatever other fall trials are available -- currently just SA06, since
+that's the only subject downloaded so far). Degrades gracefully to
+whatever subjects are present -- `--subjects`/`--max-trials-per-subject`
+flags exist but aren't required.
+
+**Smoke-tested (not real-data-tested)**: this was run and debugged
+against the repo's own synthetic `tests/fixtures/kfall_mock/` data
+(temporarily copied to `data/raw/kfall/`, then removed -- not committed)
+just to confirm the script runs end-to-end without crashing. Caught and
+fixed one real bug this way: the first draft's trial de-duplication used
+`t not in picks`, which raises `ValueError: The truth value of a
+DataFrame is ambiguous` because `ParsedTrial` holds a DataFrame field --
+fixed to compare by `id()` instead. On the fixture stand-in, output
+looked exactly as expected (harmonized panel shows no persistent DC
+gravity bias, matching Task 3.7's finding; SA06 T22's fixture fall trial
+showed a small single-digit frame offset between labeled and detected
+impact).
+
+**Not yet done**: an actual run against real KFall data with the real
+output eyeballed by a human. Run `python notebooks/stage3_visual_qa.py`
+locally against your real `data/raw/kfall/` and look at the PNGs and
+`impact_frame_check.csv` under `results/stage3_visual_qa/` before
+considering Stage 3 fully closed. Re-run again as more real subjects
+(beyond SA06) get downloaded -- widening the impact-frame check and
+finally exercising `auto_detected`/`group_fallback` calibration tiers on
+real data, which haven't been touched by real data yet (see note above).
+
+This is the last Stage 3 item before Stage 4 (manifest builder --
+`shared/manifest.py` already exists in minimal form from Task 3.10;
+Stage 4 extends it into the FULL cross-dataset manifest all pipelines
+will query against) and before extending harmonization to SisFall
+(Stage 5).
 
 ---
 
