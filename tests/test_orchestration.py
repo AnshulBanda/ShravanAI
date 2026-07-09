@@ -98,6 +98,17 @@ def test_end_to_end_writes_manifest(tmp_path):
     assert len(manifest_df) == 5
     assert set(manifest_df["subject_id"]) == {"SA06", "SA07"}
 
+    # Stage 4 fields: populated, not left as defaults/nulls where they
+    # shouldn't be.
+    assert (manifest_df["sample_rate_hz"] == 100.0).all()
+    assert (manifest_df["duration_s"] > 0).all()
+    fall_row = manifest_df[manifest_df["activity_code"] == "T22"].iloc[0]
+    assert fall_row["label"] == "fall"
+    assert fall_row["fall_onset_frame"] is not None
+    assert fall_row["fall_impact_frame"] is not None
+    adl_row = manifest_df[manifest_df["activity_code"] == "T01"].iloc[0]
+    assert pd.isna(adl_row["fall_onset_frame"])
+
 
 def test_end_to_end_manifest_skipped_when_no_path_given(tmp_path):
     # manifest_path is optional -- confirms it doesn't error or write

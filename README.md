@@ -13,8 +13,9 @@ not inside it) for the full design rationale.
 - [x] Stage 3, Tasks 3.1-3.11 — KFall harmonization pipeline complete,
       including the visual QA pass run against real data. Stage 3 is
       done for KFall.
-- [ ] Stage 4 — manifest builder (extends the minimal `shared/manifest.py`
-      already added in Task 3.10 into the full cross-dataset manifest)
+- [x] Stage 4 — manifest builder: `shared/manifest.py` extended into
+      the full cross-dataset manifest (upsert-safe across datasets,
+      `query_detection_trials`/`query_prediction_trials` helpers)
 - [ ] Stage 5+ — SisFall harmonization, then FallAllD -- see blueprint
 
 ## Setup

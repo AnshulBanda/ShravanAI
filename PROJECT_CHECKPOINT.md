@@ -1,7 +1,7 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 3, Task 3.11 (visual QA script, run against
-real SA06 data by a human -- Stage 3 is now complete for KFall)
+Last updated: after Stage 4 (cross-dataset manifest builder complete;
+Stage 3 complete for KFall; Stage 5, SisFall harmonization, is next)
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -383,6 +383,80 @@ This is the last Stage 3 item before Stage 4 (manifest builder --
 Stage 4 extends it into the FULL cross-dataset manifest all pipelines
 will query against) and before extending harmonization to SisFall
 (Stage 5).
+
+---
+
+### Stage 4 — COMPLETE (manifest builder)
+Extended `shared/manifest.py` from Stage 3's minimal per-run version
+into the full cross-dataset manifest described in the blueprint's §4:
+"the single index both pipelines query against."
+
+**Schema extended.** `ManifestRow` gained `duration_s`, `sample_rate_hz`,
+`fall_onset_frame`, `fall_impact_frame` -- the blueprint's documented
+columns -- on top of the two provenance fields (`accepted`,
+`calibration_source`) already in the Stage 3 version, which were worth
+keeping rather than dropping. `orchestration.py` now computes
+`duration_s` from the harmonized signal length and target rate, and
+carries `fall_onset_frame`/`fall_impact_frame` straight through from
+`trial.metadata`.
+
+**Real bug found and fixed: `write_manifest` was a silent overwrite.**
+The Stage 3 version did a plain `df.to_parquet(path)` on every call. Since
+`harmonize_dataset.py` writes every dataset to the SAME
+`manifest.parquet` path, running `--dataset kfall` today and
+`--dataset sisfall` next month (Stage 5+) would have silently deleted
+every KFall row the moment the SisFall write happened -- exactly the
+opposite of "single source of truth across datasets." `write_manifest`
+now upserts by primary key (`dataset, subject_id, activity_code,
+trial_id`): a matching existing row gets replaced, everything else is
+preserved. This also makes re-running the SAME dataset (e.g. after a
+harmonization bugfix) safe -- it replaces that dataset's rows in place
+instead of duplicating them. Caught by a dedicated test
+(`test_write_manifest_preserves_other_datasets`) before this could bite
+during Stage 5.
+
+**Query interface added**, matching the blueprint's documented filters
+exactly so `detection/dataset.py` / `prediction/dataset.py` (not built
+yet -- later stages) have a real function to call rather than
+hand-rolling the same pandas filter twice:
+- `query_detection_trials(df, datasets=None, accepted_only=True)` --
+  every dataset, both labels, quarantined trials excluded by default.
+- `query_prediction_trials(df, accepted_only=True)` -- KFall only,
+  and only rows where onset/impact labeling actually applies (fall
+  trials with a labeled onset frame, or ADL trials as the negative
+  class). A fall-labeled row with a missing onset frame (a labeling
+  gap) is deliberately excluded, not silently included with a null.
+
+**One parquet round-trip gotcha worth remembering**: `None` in an
+`Optional[int]` column (e.g. `fall_onset_frame` on an ADL row) comes
+back from `pd.read_parquet` as `NaN` (float), not `None` -- a plain `is
+None` check on a loaded row will silently fail. Use `pd.isna(...)`
+instead. `query_prediction_trials`'s `.notna()` filter already handles
+this correctly; it only came up as a test-assertion bug
+(`fall_onset_frame is None` vs. `pd.isna(fall_onset_frame)`), not a
+production-code bug.
+
+**Tests**: `tests/test_manifest.py` (10 tests: round-trip, upsert
+same-dataset, preserve-other-datasets, replace-only-matching-trials,
+both query functions including the accepted-filtering and
+onset-frame-gap edge cases), plus `test_orchestration.py`'s
+`test_end_to_end_writes_manifest` extended to assert the new fields are
+actually populated end-to-end, not just present in the schema. Full
+suite: 108 passed.
+
+**Real-data smoke test** (not just fixtures): ran
+`scripts/harmonize_dataset.py --dataset kfall` twice in a row against
+the fixture set standing in for real data, confirming the upsert
+behavior holds outside of unit tests too -- second run produced the
+same 5 manifest rows, not 10.
+
+**Next up**: Stage 5 -- extend harmonization to SisFall. This is where
+`shared/harmonize/units.py`'s unit-conversion and
+`shared/harmonize/resample.py`'s resampling modules finally do real
+work instead of being KFall no-ops (KFall is already 100 Hz and
+already in g/deg-per-s, so both stages passed through unchanged so
+far). Will need a `shared/io/readers_sisfall.py` reader and a
+`configs/datasets/sisfall.yaml`, following the same pattern as KFall's.
 
 ---
 

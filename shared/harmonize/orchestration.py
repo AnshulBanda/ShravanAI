@@ -112,15 +112,25 @@ def run_harmonization(
         else:
             n_written += 1
 
+        duration_s = (
+            len(harmonized_signal) / harmonization_config.target_rate_hz
+            if len(harmonized_signal) > 0
+            else 0.0
+        )
+
         manifest_rows.append(ManifestRow(
             dataset=dataset,
             subject_id=trial.metadata.subject_id,
             activity_code=trial.metadata.activity_code,
             trial_id=trial.metadata.trial_id,
             label=trial.metadata.label,
+            duration_s=duration_s,
+            sample_rate_hz=harmonization_config.target_rate_hz,
             accepted=(len(issues) == 0),
             calibration_source=calibration.source,
             harmonized_path=str(written_path),
+            fall_onset_frame=trial.metadata.fall_onset_frame,
+            fall_impact_frame=trial.metadata.fall_impact_frame,
         ))
 
     if manifest_path is not None:
