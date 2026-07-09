@@ -9,6 +9,7 @@ dependencies = [
     "omegaconf",
     "openpyxl",
     "pyarrow",
+    "matplotlib",
 ]
 
 [project.optional-dependencies]

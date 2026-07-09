@@ -46,7 +46,7 @@ FallAllD) are NOT stored in git — `data/raw/` is gitignored.
 - `tests/test_kfall_reader.py`
 - Real-data verification done end-to-end (see "Verified facts about real KFall data" below) — this took three rounds of fixing real mismatches, all now handled and tested.
 
-### Stage 3 — IN PROGRESS
+### Stage 3 — COMPLETE (for KFall)
 Frozen design (do not redesign further, per explicit instruction):
 - Unit conversion: common interface, KFall is a no-op
 - Target sampling rate: **100 Hz**
