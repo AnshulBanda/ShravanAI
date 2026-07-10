@@ -116,7 +116,7 @@ def test_discover_trials_excludes_readme_and_non_matching_files():
 def test_load_all_trials_loads_every_subject():
     trials = load_all_trials(FIXTURE_ROOT)
 
-    assert len(trials) == 3
+    assert len(trials) == 4
     assert {t.metadata.subject_id for t in trials} == {"SA01", "SA02"}
     assert {t.metadata.label for t in trials} == {"adl", "fall"}
 
@@ -127,4 +127,4 @@ def test_load_all_trials_accepts_ignored_label_root_for_signature_parity():
     # registered in orchestration._TRIAL_LOADERS alongside KFall's
     # loader without a wrapper function.
     trials = load_all_trials(FIXTURE_ROOT, None)
-    assert len(trials) == 3
+    assert len(trials) == 4

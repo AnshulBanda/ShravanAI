@@ -17,13 +17,13 @@ not inside it) for the full design rationale.
       the full cross-dataset manifest (upsert-safe across datasets,
       `query_detection_trials`/`query_prediction_trials` helpers)
 - [ ] Stage 5 — SisFall harmonization (IN PROGRESS): reader
-      (`shared/io/readers_sisfall.py`) and unit converter
-      (`SisFallUnitConverter`) built and unit-tested against real-format
-      fixtures. Still open: run `scripts/verify_sisfall_reader.py`
-      against the full real dataset, resolve a real design question in
-      `axis_alignment.py`'s T01-calibration assumption (see
-      PROJECT_CHECKPOINT.md), wire into `orchestration.py`, exercise
-      real 200→100Hz resampling for the first time, visual QA.
+      real-data-verified (all 4,505 real files); unit converter,
+      calibration wiring, and orchestration integration complete
+      (134 tests passing, incl. 2 real bugs found/fixed while wiring).
+      Still open: run `scripts/harmonize_dataset.py --dataset sisfall`
+      against the FULL real dataset (only fixture-tested so far),
+      verify the standing-initiated activity-code assumption against
+      real data, visual QA pass.
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
 ## Setup

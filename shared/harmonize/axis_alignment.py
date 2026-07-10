@@ -16,9 +16,20 @@ Calibration source priority (frozen design, see PROJECT_CHECKPOINT.md):
 
 This module is deliberately dataset-agnostic: it only requires objects
 with a `.signal` DataFrame (with acc_x/y/z, gyro_x/y/z columns) and a
-`.metadata.task_id` int -- it does not import KFall's reader directly,
-so the same calibration logic will apply to SisFall/FallAllD later
-without modification.
+`.metadata.task_id` int -- it does not import KFall's reader directly.
+
+Stage 5 update: this was ALMOST true from the start but not quite --
+`calibrate_subject` used to hardcode `task_id == 1` as "the" primary
+calibration trial with no way to opt out. That's fine for KFall (T01
+really is task_id 1), but SisFall's D01 ("walking slowly") also happens
+to be task_id 1 purely by coincidence of activity-code ordering, and
+isn't a calibration trial at all -- SisFall has no dedicated
+stand-still trial. `calibrate_subject` now takes an explicit
+`primary_calibration_task_id` parameter (default `T01_TASK_ID`,
+preserving KFall's exact prior behavior) so callers for datasets
+without a primary calibration trial can pass `None` and skip straight
+to auto-detection, instead of that skip happening as an accident of
+numbering.
 """
 from __future__ import annotations
 
@@ -128,24 +139,45 @@ def calibrate_subject(
     sample_rate_hz: float = 100.0,
     min_duration_s: float = 2.0,
     t01_min_coverage_fraction: float = 0.5,
+    primary_calibration_task_id: Optional[int] = T01_TASK_ID,
 ) -> Optional[CalibrationResult]:
     """Compute a subject's gravity-alignment calibration.
 
     `trials` is that subject's list of parsed trials (any object with
-    `.signal` and `.metadata.task_id`). Tries T01 first, falls back to
+    `.signal` and `.metadata.task_id`). Tries the primary calibration
+    trial first (KFall: T01, `task_id == 1` by default), falls back to
     auto-detecting stillness in a standing-initiated trial. Returns
     None if neither succeeds -- see module docstring for what happens next.
+
+    `primary_calibration_task_id`: the task_id of this dataset's
+    dedicated "stand still" trial, if it has one. Defaults to
+    `T01_TASK_ID` (1) to match KFall's existing behavior exactly.
+    **Pass `None` for any dataset that has no dedicated calibration
+    trial** (e.g. SisFall, where every activity code is a real movement
+    task and none is a reserved stand-still trial) -- this skips
+    straight to the auto-detect fallback below, rather than risking a
+    coincidental `task_id == 1` match on some unrelated activity being
+    mislabeled with the KFall-specific "T01" calibration-source string.
+    This parameter exists specifically because task_id numbering is NOT
+    comparable across datasets (SisFall's D01 "walking slowly" happens
+    to also have task_id 1, purely by coincidence of activity-code
+    ordering) -- discovered while wiring SisFall into Stage 5, see
+    PROJECT_CHECKPOINT.md.
     """
-    t01_trial = next((t for t in trials if t.metadata.task_id == T01_TASK_ID), None)
-    if t01_trial is not None:
-        segment = detect_stationary_segment(t01_trial.signal, sample_rate_hz, min_duration_s)
-        if segment is not None:
-            start, end = segment
-            coverage = (end - start) / len(t01_trial.signal)
-            if coverage >= t01_min_coverage_fraction:
-                return _calibration_from_segment(t01_trial.signal, start, end, source="T01")
-            # T01 exists but the subject wasn't still for most of it --
-            # don't trust it, fall through to auto-detection below.
+    if primary_calibration_task_id is not None:
+        t01_trial = next(
+            (t for t in trials if t.metadata.task_id == primary_calibration_task_id),
+            None,
+        )
+        if t01_trial is not None:
+            segment = detect_stationary_segment(t01_trial.signal, sample_rate_hz, min_duration_s)
+            if segment is not None:
+                start, end = segment
+                coverage = (end - start) / len(t01_trial.signal)
+                if coverage >= t01_min_coverage_fraction:
+                    return _calibration_from_segment(t01_trial.signal, start, end, source="T01")
+                # T01 exists but the subject wasn't still for most of it --
+                # don't trust it, fall through to auto-detection below.
 
     for trial in sorted(trials, key=lambda t: (t.metadata.task_id, t.metadata.trial_id)):
         if trial.metadata.task_id not in standing_initiated_task_ids:

@@ -226,3 +226,69 @@ def test_calibrate_subject_ignores_non_standing_initiated_tasks_in_fallback():
 
     result = calibrate_subject(trials)
     assert result is None
+
+
+# --- primary_calibration_task_id (Stage 5: SisFall has no T01-equivalent) ---
+
+def test_calibrate_subject_primary_task_id_none_skips_task_id_1_entirely():
+    # A trial that would look exactly like a valid T01 (task_id=1,
+    # genuinely still for its whole duration) must be IGNORED as a
+    # primary-calibration candidate when primary_calibration_task_id is
+    # explicitly None -- e.g. SisFall's D01 ("walking slowly") happens
+    # to also be task_id 1, and must never be mistaken for a dedicated
+    # calibration trial just because of that numeric coincidence.
+    task_id_1_signal = _make_signal([(300, "still", [0.0, 0.0, 1.0])])
+    standing_initiated_signal = _make_signal([
+        (250, "still", [0.2, 0.0, 0.98]),
+        (150, "moving", None),
+    ])
+    trials = [
+        _FakeTrial(signal=task_id_1_signal, metadata=_FakeMetadata(task_id=1)),
+        _FakeTrial(signal=standing_initiated_signal, metadata=_FakeMetadata(task_id=7)),
+    ]
+
+    result = calibrate_subject(
+        trials,
+        standing_initiated_task_ids=frozenset({7}),
+        primary_calibration_task_id=None,
+    )
+
+    assert result is not None
+    assert result.source == "auto_detected"
+    # Sanity check it actually used task_id=7's gravity direction
+    # ([0.2, 0, 0.98]-ish), not task_id=1's ([0, 0, 1]) -- confirms the
+    # task_id=1 trial was genuinely skipped, not just deprioritized.
+    np.testing.assert_allclose(
+        result.gravity_vector / np.linalg.norm(result.gravity_vector),
+        [0.2, 0.0, 0.98], atol=0.05,
+    )
+
+
+def test_calibrate_subject_primary_task_id_none_with_no_fallback_returns_none():
+    # If the ONLY still trial available is task_id=1 and primary
+    # calibration is disabled, and task_id=1 isn't in the
+    # standing-initiated fallback set either, this must return None --
+    # not silently fall back to using it anyway.
+    task_id_1_signal = _make_signal([(300, "still", [0.0, 0.0, 1.0])])
+    trials = [_FakeTrial(signal=task_id_1_signal, metadata=_FakeMetadata(task_id=1))]
+
+    result = calibrate_subject(
+        trials,
+        standing_initiated_task_ids=frozenset({7, 8, 9}),  # deliberately excludes 1
+        primary_calibration_task_id=None,
+    )
+
+    assert result is None
+
+
+def test_calibrate_subject_default_primary_task_id_preserves_kfall_behavior():
+    # Explicitly confirms the default argument still behaves exactly
+    # like the pre-Stage-5 hardcoded version: task_id=1, sufficiently
+    # still, with primary_calibration_task_id left at its default.
+    t01_signal = _make_signal([(300, "still", [0.0, 0.0, 1.0])])
+    trials = [_FakeTrial(signal=t01_signal, metadata=_FakeMetadata(task_id=1))]
+
+    result = calibrate_subject(trials)
+
+    assert result is not None
+    assert result.source == "T01"

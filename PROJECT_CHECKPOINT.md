@@ -1,10 +1,12 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 5 (in progress) -- SisFall reader and unit
-converter built and unit-tested; NOT yet run against full real data,
-and orchestration wiring (incl. a real design question about
-axis_alignment.py's T01 assumption) is still open. See Stage 5 section
-below before continuing.
+Last updated: after Stage 5 (in progress) -- SisFall reader
+real-data-verified; unit converter, calibration wiring, and full
+orchestration integration done and passing (134 tests); two real bugs
+found and fixed while wiring (calibration ran on raw not converted
+signal; wrong sample rate passed to the stationarity detector). NOT yet
+run against the full real dataset end-to-end (only against fixtures) --
+see Stage 5 section below before continuing.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -536,26 +538,101 @@ fixed one now-broken existing test
 to use `"sisfall"` as its example of an unregistered dataset; now uses
 `"fallallD"`). Full suite: 127 passed.
 
-**`scripts/verify_sisfall_reader.py` added**: loads every real trial
-file under `data/raw/sisfall/SisFall_dataset/` (not just fixtures) and
-reports subject coverage, label counts, row-count sanity, and any
-per-file parse failures -- the same real-data-verification role
-`scripts/verify_setup.py` played for KFall's Stage 2. Smoke-tested
-against the fixture set standing in for real data; not yet run against
-the full real ~4,505-file dataset by a human.
+**`scripts/verify_sisfall_reader.py` added, and RUN against the full
+real dataset (not just fixtures).** Result: all 4,505 real files loaded
+with 0 failures, all 38 subjects present. Cross-checked the label
+counts against the Readme's own protocol tables, not just trusted "0
+errors": ADL=2,707 vs. ~2,702 expected (23 young subjects x 79 trials +
+15 elderly x 59 trials after the mandatory D06/D13/D18/D19 skip,
++5 accounted for by the Readme's own note that some elderly subjects
+had additional individual activity variations); Fall=1,798 vs. 1,800
+expected (23 young subjects + SE06's Judo-expert exception x 75 fall
+trials each, -2 consistent with the already-noted 4,505-vs-4,510 file
+gap). Row counts: min ~10s, mean ~17.6s, max 180s (a bit above the
+Readme's longest *nominal* 100s category, plausibly just some trials
+running longer in practice -- not a parsing concern given 0 failures
+and consistent 9-column structure throughout). The SisFall reader is
+now considered REAL-DATA VERIFIED, the same standard KFall's reader
+was held to in Stage 2 -- notably cleaner than KFall's initial real-data
+pass, which found 3 real mismatches on first run.
 
-**Not yet done**: (1) run `verify_sisfall_reader.py` against the full
-real dataset; (2) resolve the `calibrate_subject`/T01 design question
-above; (3) wire SisFall into `orchestration.py`'s `_TRIAL_LOADERS` and
-pick/verify a SisFall-appropriate standing-initiated activity-code set
-(candidates: D07-D10 sit/stand, D15-D17 standing-bend/car-entry --
-none of these is confirmed to actually start with a genuine still
-segment the way KFall's were, this needs the same kind of real-data
-stationarity check Task 3.4 originally did for KFall); (4) exercise
-real resampling (200 Hz -> 100 Hz) for the first time, which has only
-ever run as a no-op against KFall's already-100Hz data so far; (5) a
-Task-3.11-style visual QA pass on real SisFall trials before trusting
-any of this.
+**Orchestration wiring done. Two more real bugs found and fixed in the process** (not hypothetical -- both caught by tests failing, not by inspection):
+
+1. **`calibrate_subject`'s hardcoded T01 assumption** (flagged above) --
+   fixed. `axis_alignment.py`'s `calibrate_subject` now takes an
+   explicit `primary_calibration_task_id` parameter (default
+   `T01_TASK_ID`, preserving KFall's exact prior behavior byte-for-byte
+   -- all 12 pre-existing tests pass unchanged). `orchestration.py`
+   passes `None` for SisFall via a new `_CALIBRATION_CONFIG` registry
+   (same pattern as `units.py`'s converter registry), so SisFall's D01
+   (coincidentally also task_id 1) can never be mistaken for a
+   dedicated calibration trial.
+
+2. **New bug, found only once SisFall was actually wired in**:
+   `calibrate_subject` was being called on each trial's RAW,
+   not-yet-unit-converted `.signal`. This happened to work for KFall
+   purely by coincidence -- KFall's raw reader output already uses the
+   canonical `acc_x/y/z` column names, since its unit converter is a
+   verified no-op. SisFall's raw reader output uses `raw_adxl_acc_x`
+   etc., so calling calibration on it crashed outright
+   (`KeyError: 'acc_x'`) -- caught immediately by
+   `test_end_to_end_sisfall_processes_all_fixture_trials`, not
+   discovered later against real data. Fixed with a small
+   `_CalibrationView` wrapper in `orchestration.py`: every trial is now
+   run through its dataset's unit converter BEFORE calibration, not
+   just before the main `harmonize_trial` call. Converting twice
+   (once for calibration, once inside `harmonize_trial`) is mildly
+   redundant but harmless -- converters are pure, side-effect-free
+   functions (see `units.py`'s "does not mutate input" tests).
+
+3. **Also fixed while wiring**: `calibrate_subject`'s `sample_rate_hz`
+   was being left at its default (100.0, correct for KFall) regardless
+   of dataset. Now `orchestration.py` passes each subject's actual
+   native rate (`subject_trials[0].metadata.native_rate_hz`) --
+   otherwise SisFall's 200 Hz raw signal would have had its
+   stationarity-detector window sized as if it were 100 Hz, silently
+   using half the intended window duration.
+
+**SisFall's standing-initiated activity-code set** (for the
+auto-detect calibration fallback), chosen in `orchestration.py`:
+`{D07, D08, D09, D10, D15, D16, D17}` (sit-in-chair activities, which
+begin standing; standing-bend and standing-into-car activities, which
+begin standing by definition). **Still an assumption**, not yet
+confirmed against real SisFall data the way Task 3.4 confirmed KFall's
+-- needs the same kind of real stationarity check before fully trusting
+it.
+
+**Tests**: fixture set extended with a genuinely-still SisFall trial
+(SA02's D07) to exercise the auto_detected tier end-to-end -- this
+required regenerating that fixture with realistic raw-ADC noise
+amplitude after the first attempt's arbitrary noise level, once run
+through the REAL ADXL345 conversion formula, produced too much
+post-conversion variance to pass the stationarity threshold (a fixture
+realism bug on my part, not a production bug -- worth remembering that
+"looks like plausible raw sensor noise" isn't the same as "converts to
+plausible physical-unit noise" when picking synthetic ADC values).
+4 new end-to-end SisFall orchestration tests, 3 new axis_alignment
+tests for the `primary_calibration_task_id` parameter. Full suite:
+134 passed.
+
+**Real end-to-end smoke test** (fixture set standing in for real data,
+via `scripts/harmonize_dataset.py --dataset sisfall`): also fixed two
+CLI bugs this surfaced -- `--dataset` choices were hardcoded to
+`["kfall"]` only, and `label_root = REPO_ROOT / cfg.dataset.label_root`
+crashed on SisFall's `label_root: null` config (now only resolved when
+actually configured). Smoke test produced sensible output: 4 trials
+processed, 0 quarantined, calibration sources `{auto_detected: 1,
+group_fallback: 1}`, correct halved row counts confirming real
+200->100Hz resampling actually ran (previously only ever a no-op
+against KFall's already-100Hz data).
+
+**Not yet done**: (1) run `scripts/harmonize_dataset.py --dataset
+sisfall` against the FULL real dataset (this session only verified
+against the fixture set, not the real ~4,505 files -- unlike the reader
+itself, which IS real-data verified); (2) verify the
+standing-initiated activity-code assumption above against real data;
+(3) a Task-3.11-style visual QA pass on real SisFall trials before
+trusting any of this for downstream training.
 
 ---
 

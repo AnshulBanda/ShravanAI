@@ -19,13 +19,17 @@ REPO_ROOT = Path(__file__).parent.parent
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Harmonize a dataset end-to-end.")
-    parser.add_argument("--dataset", required=True, choices=["kfall"])
+    parser.add_argument("--dataset", required=True, choices=["kfall", "sisfall"])
     args = parser.parse_args()
 
     cfg = load_config(REPO_ROOT / "configs" / "datasets" / f"{args.dataset}.yaml")
 
     sensor_root = REPO_ROOT / cfg.dataset.sensor_root
-    label_root = REPO_ROOT / cfg.dataset.label_root
+    # label_root is optional -- SisFall has no separate label file at
+    # all (see configs/datasets/sisfall.yaml), so its config sets this
+    # to null/None. Resolving `REPO_ROOT / None` would crash, so only
+    # resolve it when a real path is actually configured.
+    label_root = REPO_ROOT / cfg.dataset.label_root if cfg.dataset.label_root else None
     harmonized_root = REPO_ROOT / cfg.paths.harmonized
     quarantine_root = harmonized_root.parent / "_quarantine"
     manifest_path = harmonized_root / "manifest.parquet"
