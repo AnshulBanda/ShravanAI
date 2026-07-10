@@ -1,7 +1,10 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 4 (cross-dataset manifest builder complete;
-Stage 3 complete for KFall; Stage 5, SisFall harmonization, is next)
+Last updated: after Stage 5 (in progress) -- SisFall reader and unit
+converter built and unit-tested; NOT yet run against full real data,
+and orchestration wiring (incl. a real design question about
+axis_alignment.py's T01 assumption) is still open. See Stage 5 section
+below before continuing.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -457,6 +460,102 @@ work instead of being KFall no-ops (KFall is already 100 Hz and
 already in g/deg-per-s, so both stages passed through unchanged so
 far). Will need a `shared/io/readers_sisfall.py` reader and a
 `configs/datasets/sisfall.yaml`, following the same pattern as KFall's.
+
+---
+
+### Stage 5 — IN PROGRESS (reader + unit converter done; orchestration wiring NOT done yet)
+
+**Real dataset downloaded and inspected** (not assumed from the paper):
+Kaggle mirror `kushajm/sisfall-dataset-fall-detection`, unzipped to
+`data/raw/sisfall/SisFall_dataset/`. Confirmed against real files: 9
+comma-separated raw ADC columns per row, semicolon-terminated, no
+header (`accX,accY,accZ` ADXL345, `gyroX,gyroY,gyroZ` ITG3200,
+`accX,accY,accZ` MMA8451Q); column count verified consistent (9) across
+a real sample; clean file tails (no malformed trailing rows); all 38
+subject folders present (SA01-23, SE01-15); 4,505 real files vs. the
+Readme's stated 4,510 -- a 5-file gap, not investigated further since
+the Readme itself documents that elderly subjects skip several
+activities (D06/D13/D18/D19 plus individual impairment-based skips),
+which plausibly accounts for it, and all 38 subjects being present
+rules out a whole-subject download gap.
+
+**`shared/io/readers_sisfall.py` added.** Same "dumb reader" scope as
+`readers_kfall.py` -- parses the native format faithfully (raw ADC
+integers, not physical units) and does no unit conversion, resampling,
+or filtering. Fall/ADL label comes straight from the filename prefix
+(`D`=adl, `F`=fall) -- no separate label file exists for SisFall, and
+critically, **SisFall has NO frame-level fall onset/impact
+annotation anywhere**, even for real fall trials. `fall_onset_frame`/
+`fall_impact_frame` are always `None` for every SisFall trial. This
+isn't a parsing gap -- it's a genuine dataset limitation, and it's
+exactly why the blueprint restricts the prediction pipeline (which
+needs onset/impact frames) to KFall only. Stage 4's
+`query_prediction_trials()` already filters on `dataset == "kfall"`, so
+this required zero downstream changes.
+
+**`shared/harmonize/units.py`: `SisFallUnitConverter` added**, using
+the exact ADC-to-physical formula from SisFall's own Readme.txt
+(`physical = [(2*Range)/(2^Resolution)] * raw_value`, different
+Range/Resolution per sensor). **Design decision made, not just an
+implementation detail**: SisFall has TWO accelerometers (ADXL345,
+MMA8451Q) but the rest of the pipeline expects a single `acc_x/y/z`
+triplet. Resolved by following the SisFall paper's own stated
+methodology -- ADXL345 becomes `acc_x/y/z` ("energy efficient... larger
+span," per Sucerquia et al. 2017), ITG3200 becomes `gyro_x/y/z`, and
+MMA8451Q is converted too but kept under its own `mma_acc_*` columns,
+preserved through this step and then dropped by `pipeline.py`'s
+existing channel-restriction step -- same archive-then-drop treatment
+KFall's Euler columns already get, so `pipeline.py` needed zero changes
+for this.
+
+**Real bug avoided, not yet fixed -- flagged for the next session.**
+`shared/harmonize/axis_alignment.py`'s `calibrate_subject` hardcodes
+`T01_TASK_ID = 1` as "the" dedicated calibration-trial ID, despite its
+own docstring's claim of being fully dataset-agnostic. SisFall has NO
+dedicated stand-still calibration trial at all (D01 is "walking
+slowly," not stand-still) -- but D01's `task_id` is naturally `1`
+(first ADL code), which would coincidentally trip the hardcoded T01
+path and mislabel a walking trial's incidental brief stillness as a
+"T01" calibration, which is real KFall-specific terminology this
+shouldn't apply to. **Not fixed yet** -- this touches
+`axis_alignment.py`, which PROJECT_CHECKPOINT.md's Stage 3 section
+explicitly marked as frozen design, so it's flagged here for a
+deliberate decision (most likely: add an optional
+`primary_calibration_task_id` parameter to `calibrate_subject`,
+defaulting to preserve exact existing KFall behavior, with SisFall
+passing `None` to skip straight to auto-detection) rather than being
+silently patched around.
+
+**Tests**: `tests/test_sisfall_reader.py` (14 tests, against
+synthetic fixtures in `tests/fixtures/sisfall_mock/` built to match
+the real format) and `tests/test_units.py` extended with 6 new
+SisFallUnitConverter tests, including exact-value checks against the
+Readme's documented conversion formula for all three sensors. Also
+fixed one now-broken existing test
+(`test_get_unit_converter_unknown_dataset_raises_with_known_list` used
+to use `"sisfall"` as its example of an unregistered dataset; now uses
+`"fallallD"`). Full suite: 127 passed.
+
+**`scripts/verify_sisfall_reader.py` added**: loads every real trial
+file under `data/raw/sisfall/SisFall_dataset/` (not just fixtures) and
+reports subject coverage, label counts, row-count sanity, and any
+per-file parse failures -- the same real-data-verification role
+`scripts/verify_setup.py` played for KFall's Stage 2. Smoke-tested
+against the fixture set standing in for real data; not yet run against
+the full real ~4,505-file dataset by a human.
+
+**Not yet done**: (1) run `verify_sisfall_reader.py` against the full
+real dataset; (2) resolve the `calibrate_subject`/T01 design question
+above; (3) wire SisFall into `orchestration.py`'s `_TRIAL_LOADERS` and
+pick/verify a SisFall-appropriate standing-initiated activity-code set
+(candidates: D07-D10 sit/stand, D15-D17 standing-bend/car-entry --
+none of these is confirmed to actually start with a genuine still
+segment the way KFall's were, this needs the same kind of real-data
+stationarity check Task 3.4 originally did for KFall); (4) exercise
+real resampling (200 Hz -> 100 Hz) for the first time, which has only
+ever run as a no-op against KFall's already-100Hz data so far; (5) a
+Task-3.11-style visual QA pass on real SisFall trials before trusting
+any of this.
 
 ---
 

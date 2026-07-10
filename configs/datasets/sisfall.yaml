@@ -1,0 +1,8 @@
+defaults:
+  - ../base
+
+dataset:
+  name: "sisfall"
+  sensor_root: "${paths.raw}/sisfall/SisFall_dataset"
+  label_root: null  # SisFall has no separate label file -- fall/ADL is encoded in the filename prefix (D.. vs F..), and there are no frame-level onset/impact labels at all (see readers_sisfall.py docstring).
+  native_rate_hz: 200

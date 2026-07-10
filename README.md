@@ -16,7 +16,15 @@ not inside it) for the full design rationale.
 - [x] Stage 4 — manifest builder: `shared/manifest.py` extended into
       the full cross-dataset manifest (upsert-safe across datasets,
       `query_detection_trials`/`query_prediction_trials` helpers)
-- [ ] Stage 5+ — SisFall harmonization, then FallAllD -- see blueprint
+- [ ] Stage 5 — SisFall harmonization (IN PROGRESS): reader
+      (`shared/io/readers_sisfall.py`) and unit converter
+      (`SisFallUnitConverter`) built and unit-tested against real-format
+      fixtures. Still open: run `scripts/verify_sisfall_reader.py`
+      against the full real dataset, resolve a real design question in
+      `axis_alignment.py`'s T01-calibration assumption (see
+      PROJECT_CHECKPOINT.md), wire into `orchestration.py`, exercise
+      real 200→100Hz resampling for the first time, visual QA.
+- [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
 ## Setup
 
