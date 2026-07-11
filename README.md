@@ -16,17 +16,14 @@ not inside it) for the full design rationale.
 - [x] Stage 4 — manifest builder: `shared/manifest.py` extended into
       the full cross-dataset manifest (upsert-safe across datasets,
       `query_detection_trials`/`query_prediction_trials` helpers)
-- [ ] Stage 5 — SisFall harmonization (IN PROGRESS): reader
-      real-data-verified (all 4,505 real files). Full orchestration
-      wiring done and RUN against the full real dataset: 4,505 trials,
-      0 quarantined, calibration sources `{auto_detected: 38}` (0
-      group_fallback, 0 T01, as designed). Calibration logic refactored
-      into shared `resolve_calibrations()`/`get_trial_loader()` in
-      `orchestration.py`; `notebooks/stage3_visual_qa.py` generalized
-      to support `--dataset {kfall,sisfall}`. Still open: actually run
-      the visual QA script against real SisFall data and look at the
-      plots -- the clean calibration numbers above are a good sign but
-      not yet visually confirmed.
+- [x] Stage 5 — SisFall harmonization: reader real-data-verified (all
+      4,505 real files); orchestration wiring run against the full real
+      dataset (0 quarantined, all 38 subjects calibrated via
+      auto_detected); visual QA pass against real data confirms the
+      calibration assumption and fall-signal shape look correct. One
+      known gap: only 1 of 7 standing-initiated activity codes was
+      individually eyeballed (see PROJECT_CHECKPOINT.md).
+- [ ] Stage 6+ — FallAllD -- see blueprint
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
 ## Setup

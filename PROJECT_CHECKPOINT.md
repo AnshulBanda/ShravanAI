@@ -1,14 +1,12 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 5 (in progress) -- SisFall reader
-real-data-verified; full orchestration wiring done and run against the
-FULL real dataset (4,505 trials, 0 quarantined, all 38 subjects
-calibrated via auto_detected, 0 group_fallback, 0 T01 -- as designed).
-Calibration logic refactored into shared `resolve_calibrations()`/
-`get_trial_loader()` functions, and the visual QA script generalized
-to support --dataset. Still NOT visually confirmed against real SisFall
-plots by a human -- see Stage 5 section below before fully trusting the
-standing-initiated activity-code assumption.
+Last updated: after Stage 5 visual QA pass against real SisFall data --
+D17's standing-initiated assumption directly confirmed visually, fall
+trials show physically sensible shapes, unit conversion confirmed
+producing sane gravity values on real data. Stage 5 is now considered
+functionally complete for SisFall harmonization -- see Stage 5 section
+below for the one remaining honest gap (6 of 7 standing-initiated codes
+not individually eyeballed) and next steps (Stage 6 candidates).
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -659,16 +657,46 @@ column names generically (KFall: `acc_x` already; SisFall:
 `raw_adxl_acc_x`, excluding the archived `raw_mma_acc_*` columns)
 rather than assuming KFall's post-conversion column names pre-exist on
 the raw signal. Smoke-tested against BOTH datasets' fixture sets
-(4 plots + calibration summary each) -- not yet run against real
-SisFall data by a human.
+(4 plots + calibration summary each).
 
-**Not yet done**: (1) run the generalized
-`notebooks/stage3_visual_qa.py --dataset sisfall` against real SisFall
-data and actually look at the plots -- this is the step that would
-visually confirm (or refute) the 38/38 auto_detected result above is
-picking genuinely-still segments and not a false positive of the
-variance threshold; (2) decide, based on that visual check, whether the
-standing-initiated activity-code set needs adjustment.
+**Visual QA pass completed against real SisFall data.** Ran
+`notebooks/stage3_visual_qa.py --dataset sisfall` against the full real
+dataset (114 plots, all 38 subjects), then hand-inspected 12 real
+plots spanning SA01, SA08, SE13 (D01/D02/D03/F01) and SE15 (D17 x3).
+Results, not just re-confirming the auto_detected count but actually
+looking:
+- **SE15's D17 trials directly confirm the standing-initiated
+  assumption for at least that code**: the RAW signal shows a
+  genuinely flat, motionless segment for the first ~6 seconds (constant
+  values, no oscillation, on all three axes) before the first
+  transient (getting into a car) -- this is real evidence a
+  standing-initiated trial actually starts standing-still, not just an
+  assumption from the activity's English description.
+- **Both inspected fall trials (SA01 F01, SA08 F01) show exactly the
+  expected shape**: quiet baseline, a sharp multi-g transient at the
+  fall moment (~7g and ~4g peaks respectively), settling to a new
+  baseline after. SA08's F01 additionally shows pre-fall oscillation,
+  consistent with its description ("fall forward WHILE WALKING, caused
+  by a slip") -- the harmonized signal's shape tracks the activity's
+  real biomechanics, not just noise.
+- **Gravity-scale sanity check on real data**: raw `acc_y` sits around
+  -200 to -300 raw ADC counts at rest across every inspected subject,
+  which converts to roughly -0.8 to -1.2g via the real ADXL345 scale
+  factor -- confirms the unit conversion produces physically sane
+  numbers on real data, not just passing the isolated unit tests.
+- Continuous-motion trials (D01/D02/D03) show stable, bounded
+  oscillation across the full ~100s duration with no drift, scale
+  blowup, or discontinuities, across both young (SA01, SA08) and
+  elderly (SE13) subjects.
+
+**Remaining, honest gap**: only D17 was directly visually confirmed as
+a genuinely standing-initiated trial. The other six candidate codes
+(D07-D10, D15, D16) have NOT been individually eyeballed -- the
+all-38-auto_detected result doesn't reveal which of the seven codes
+each subject actually calibrated on (the script doesn't currently log
+which specific trial's task_id was used, only the resulting source tier).
+Not considered a blocker given how clean everything inspected looks,
+but worth knowing if calibration quality issues ever surface downstream.
 
 ---
 
