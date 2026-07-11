@@ -1,12 +1,12 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after Stage 5 visual QA pass against real SisFall data --
-D17's standing-initiated assumption directly confirmed visually, fall
-trials show physically sensible shapes, unit conversion confirmed
-producing sane gravity values on real data. Stage 5 is now considered
-functionally complete for SisFall harmonization -- see Stage 5 section
-below for the one remaining honest gap (6 of 7 standing-initiated codes
-not individually eyeballed) and next steps (Stage 6 candidates).
+Last updated: after starting Stage 6 (detection pipeline windowing/
+dataset layer). Stage 5 (SisFall harmonization) is complete -- see its
+section for the one remaining honest gap. Stage 6's `detection/`
+package (windowing + windows-manifest + window-loading) is built,
+tested (154 total), and real-data smoke-tested across both datasets
+combined. No model code, feature engineering, or train/val/test
+splitting yet -- see Stage 6 section below for exact scope.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -697,6 +697,85 @@ each subject actually calibrated on (the script doesn't currently log
 which specific trial's task_id was used, only the resulting source tier).
 Not considered a blocker given how clean everything inspected looks,
 but worth knowing if calibration quality issues ever surface downstream.
+
+---
+
+### Stage 6 — IN PROGRESS (detection pipeline: windowing/dataset layer)
+
+Started building `detection/` -- the first layer of the detection
+pipeline (binary fall/ADL classification, using BOTH KFall and SisFall
+via `shared.manifest.query_detection_trials`). Scope for this pass:
+turn the trial-level manifest into a WINDOW-level manifest + a
+window-loading function. No model code, no feature engineering yet --
+just windowing and labeling, the same "one layer at a time" approach
+used for harmonization.
+
+**`detection/windowing.py`**: pure window-boundary logic
+(`generate_window_specs`), no I/O. Spec (per the blueprint's Pipeline 1
+section, §3): 2.0s windows (200 samples @ 100Hz), 1.0s stride (50%
+overlap), windows never cross a trial boundary, short trials padded
+rather than dropped. Extended that same "don't drop data" principle to
+any TRAILING leftover after a longer trial's last full-stride window
+too (not just whole-trial-shorter-than-one-window) -- a fall can occur
+near the end of a short trial file, and silently dropping that tail
+would mean silently dropping the actual fall event.
+
+**Real bug caught by its own test, fixed before it shipped**: the first
+version of the trailing-window logic computed the trailing window's
+start position from the stride-advanced loop pointer, not from where
+the last full window actually ended. This produced a REDUNDANT
+overlapping window in the exact-boundary case (trial length exactly
+divisible by the stride pattern) instead of correctly detecting "fully
+covered, nothing left to pad." Fixed to track `last_covered_end`
+explicitly and start the trailing window there.
+
+**`detection/dataset.py`**:
+- `build_windows_manifest(trial_manifest_df, config, datasets=None)`
+  -- stays a lightweight metadata operation (reconstructs each trial's
+  sample count from `duration_s * sample_rate_hz`, already exact since
+  `duration_s` was itself computed that way during Stage 4) rather than
+  opening every harmonized parquet file just to check its length.
+- **Real, certain (not hypothetical) bug prevented by design**: KFall
+  and SisFall subject IDs COLLIDE -- both use "SA01".."SA23"/
+  "SE01".."SE15"-style IDs, so KFall's SA06 and SisFall's SA06 are
+  DIFFERENT people who happen to share a subject_id string. Every
+  window record carries a `global_subject_id`
+  (`f"{dataset}_{subject_id}"`) specifically so future LOSO/LODO
+  split code has no reason to ever group by bare `subject_id` -- tested
+  directly (`test_build_windows_manifest_disambiguates_colliding_subject_ids_across_datasets`)
+  using literally-identical subject_id strings across two fake
+  datasets, since a fixture SisFall subject happening to also be SA06
+  wasn't guaranteed to occur in the real smoke test below.
+- `load_window(window_row, window_length_samples, signal_cache=None)`
+  -- loads the real signal data for ONE window, slicing + EDGE-padding
+  (repeating the last real sample, not zero-padding -- zero-padding
+  would inject a fake sudden drop-to-0g discontinuity that looks like
+  freefall to a model). Takes a caller-owned cache dict to avoid
+  re-reading the same parquet file once per overlapping window (a
+  single trial can produce dozens of windows at 50% stride).
+
+**Tests**: `tests/test_windowing.py` (9 tests, including one that
+verifies EVERY sample index in a trial is covered by at least one
+window -- catches gaps, not just off-by-one counts) and
+`tests/test_detection_dataset.py` (11 tests, including the subject-ID
+collision test above and a padding test that checks the padded values
+themselves, not just the output shape). Full suite: 154 passed.
+
+**Real end-to-end smoke test** (not just isolated unit tests): built
+real harmonized output for BOTH datasets from their fixture sets via
+`harmonize_dataset.py`, confirmed the trial manifest correctly combined
+both datasets' rows (Stage 4's upsert design proven again in a new
+context), ran `build_windows_manifest` against it, and loaded real
+window arrays end-to-end -- correct shapes, correct labels, correct
+padding, for both kfall and sisfall trials in the same run.
+
+**Not yet done**: feature engineering (§5 of the blueprint -- handcrafted
+features for an XGBoost branch), any actual model code, train/val/test
+splitting (LOSO/LODO, informed by `global_subject_id` above), and the
+label-noise question the blueprint itself flags (whole-trial labels
+applied to every window, including pre-fall/post-fall windows within a
+fall trial that don't actually contain the fall). None of this is
+started -- this pass only covers windowing + labeling.
 
 ---
 
