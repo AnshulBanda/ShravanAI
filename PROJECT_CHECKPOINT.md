@@ -1,12 +1,14 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
 Last updated: after Stage 5 (in progress) -- SisFall reader
-real-data-verified; unit converter, calibration wiring, and full
-orchestration integration done and passing (134 tests); two real bugs
-found and fixed while wiring (calibration ran on raw not converted
-signal; wrong sample rate passed to the stationarity detector). NOT yet
-run against the full real dataset end-to-end (only against fixtures) --
-see Stage 5 section below before continuing.
+real-data-verified; full orchestration wiring done and run against the
+FULL real dataset (4,505 trials, 0 quarantined, all 38 subjects
+calibrated via auto_detected, 0 group_fallback, 0 T01 -- as designed).
+Calibration logic refactored into shared `resolve_calibrations()`/
+`get_trial_loader()` functions, and the visual QA script generalized
+to support --dataset. Still NOT visually confirmed against real SisFall
+plots by a human -- see Stage 5 section below before fully trusting the
+standing-initiated activity-code assumption.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -626,13 +628,47 @@ group_fallback: 1}`, correct halved row counts confirming real
 200->100Hz resampling actually ran (previously only ever a no-op
 against KFall's already-100Hz data).
 
-**Not yet done**: (1) run `scripts/harmonize_dataset.py --dataset
-sisfall` against the FULL real dataset (this session only verified
-against the fixture set, not the real ~4,505 files -- unlike the reader
-itself, which IS real-data verified); (2) verify the
-standing-initiated activity-code assumption above against real data;
-(3) a Task-3.11-style visual QA pass on real SisFall trials before
-trusting any of this for downstream training.
+**Run against the FULL real dataset** (not just fixtures):
+`scripts/harmonize_dataset.py --dataset sisfall` processed all 4,505
+real trials, 0 quarantined, **calibration sources `{auto_detected:
+38}`** -- every single real subject calibrated successfully via
+auto-detection, zero group_fallback needed, zero (correctly) T01. This
+is strong (though not yet visually-confirmed) evidence that the
+standing-initiated activity-code guess (D07-D10, D15-D17) was
+reasonable: with up to ~35 candidate trials per subject across those 7
+codes, every subject found at least one usable stationary segment.
+
+**Refactor: extracted `resolve_calibrations()` and `get_trial_loader()`
+as public functions in `orchestration.py`.** Motivation: while
+generalizing `notebooks/stage3_visual_qa.py` for SisFall (below), found
+it had been independently reimplementing the exact two-pass calibration
+logic inline -- with the SAME "calibrate on raw signal" bug that was
+just fixed in `orchestration.py`, still present in the QA script's copy.
+This is precisely how the earlier bug could have stayed silently fixed
+in one place and broken in the other. Both `run_harmonization` and the
+QA script now call the same `resolve_calibrations(dataset, trials)` and
+`get_trial_loader(dataset)` -- one copy of this logic, not two.
+
+**`notebooks/stage3_visual_qa.py` generalized** to take `--dataset
+{kfall,sisfall}` instead of being KFall-only, reusing the extracted
+helpers above. Output now goes to
+`results/stage3_visual_qa/<dataset>/` (was previously a single shared
+directory) so different datasets don't overwrite each other's QA runs.
+Also generalized the raw-signal plot panel to detect accel-like raw
+column names generically (KFall: `acc_x` already; SisFall:
+`raw_adxl_acc_x`, excluding the archived `raw_mma_acc_*` columns)
+rather than assuming KFall's post-conversion column names pre-exist on
+the raw signal. Smoke-tested against BOTH datasets' fixture sets
+(4 plots + calibration summary each) -- not yet run against real
+SisFall data by a human.
+
+**Not yet done**: (1) run the generalized
+`notebooks/stage3_visual_qa.py --dataset sisfall` against real SisFall
+data and actually look at the plots -- this is the step that would
+visually confirm (or refute) the 38/38 auto_detected result above is
+picking genuinely-still segments and not a false positive of the
+variance threshold; (2) decide, based on that visual check, whether the
+standing-initiated activity-code set needs adjustment.
 
 ---
 

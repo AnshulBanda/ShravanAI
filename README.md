@@ -17,13 +17,16 @@ not inside it) for the full design rationale.
       the full cross-dataset manifest (upsert-safe across datasets,
       `query_detection_trials`/`query_prediction_trials` helpers)
 - [ ] Stage 5 — SisFall harmonization (IN PROGRESS): reader
-      real-data-verified (all 4,505 real files); unit converter,
-      calibration wiring, and orchestration integration complete
-      (134 tests passing, incl. 2 real bugs found/fixed while wiring).
-      Still open: run `scripts/harmonize_dataset.py --dataset sisfall`
-      against the FULL real dataset (only fixture-tested so far),
-      verify the standing-initiated activity-code assumption against
-      real data, visual QA pass.
+      real-data-verified (all 4,505 real files). Full orchestration
+      wiring done and RUN against the full real dataset: 4,505 trials,
+      0 quarantined, calibration sources `{auto_detected: 38}` (0
+      group_fallback, 0 T01, as designed). Calibration logic refactored
+      into shared `resolve_calibrations()`/`get_trial_loader()` in
+      `orchestration.py`; `notebooks/stage3_visual_qa.py` generalized
+      to support `--dataset {kfall,sisfall}`. Still open: actually run
+      the visual QA script against real SisFall data and look at the
+      plots -- the clean calibration numbers above are a good sign but
+      not yet visually confirmed.
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
 ## Setup

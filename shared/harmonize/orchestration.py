@@ -113,27 +113,36 @@ def _calibration_view(trial: Any, converter: Any) -> _CalibrationView:
     return _CalibrationView(signal=converter.convert(trial.signal), metadata=trial.metadata)
 
 
-def run_harmonization(
-    dataset: str,
-    sensor_root: Path,
-    label_root: Path,
-    harmonized_root: Path,
-    quarantine_root: Path,
-    harmonization_config: HarmonizationConfig,
-    manifest_path: Optional[Path] = None,
-) -> HarmonizationSummary:
-    """Harmonize every trial in `dataset`, end to end.
+def get_trial_loader(dataset: str):
+    """Look up the trial-loading function for a given dataset name.
 
-    Raises ValueError if `dataset` has no registered trial loader.
+    Public (mirrors `units.get_unit_converter`) so other code -- e.g.
+    `notebooks/stage3_visual_qa.py`'s QA script -- can load a dataset's
+    trials the same way `run_harmonization` does, without importing a
+    specific reader module directly or duplicating the registry.
     """
     if dataset not in _TRIAL_LOADERS:
         raise ValueError(
             f"No trial loader registered for dataset {dataset!r}. "
             f"Known datasets: {sorted(_TRIAL_LOADERS)}"
         )
+    return _TRIAL_LOADERS[dataset]
 
-    trials = _TRIAL_LOADERS[dataset](sensor_root, label_root)
 
+def resolve_calibrations(dataset: str, trials: list[Any]) -> dict[str, Any]:
+    """Two-pass per-subject calibration for a dataset's trials: try each
+    subject's own trials first (dataset-appropriate primary-trial check,
+    then auto-detect fallback), then group-average fallback for any
+    subject that didn't succeed on its own.
+
+    Public and reused by BOTH `run_harmonization` and the visual-QA
+    script -- this used to be duplicated inline in each, which is
+    exactly how the Stage 5 "calibration ran on the raw signal" and
+    "wrong sample rate" bugs stayed fixed in one copy but not the
+    other. Only one copy of this logic exists now.
+
+    Raises ValueError if `dataset` has no registered calibration config.
+    """
     if dataset not in _CALIBRATION_CONFIG:
         raise ValueError(
             f"No calibration config registered for dataset {dataset!r}. "
@@ -164,7 +173,25 @@ def run_harmonization(
         )
         for subject_id, subject_trials in by_subject.items()
     }
-    resolved_calibrations = resolve_group_fallback(per_subject_calibration)
+    return resolve_group_fallback(per_subject_calibration)
+
+
+def run_harmonization(
+    dataset: str,
+    sensor_root: Path,
+    label_root: Path,
+    harmonized_root: Path,
+    quarantine_root: Path,
+    harmonization_config: HarmonizationConfig,
+    manifest_path: Optional[Path] = None,
+) -> HarmonizationSummary:
+    """Harmonize every trial in `dataset`, end to end.
+
+    Raises ValueError if `dataset` has no registered trial loader or
+    calibration config.
+    """
+    trials = get_trial_loader(dataset)(sensor_root, label_root)
+    resolved_calibrations = resolve_calibrations(dataset, trials)
 
     manifest_rows: list[ManifestRow] = []
     n_written = 0
