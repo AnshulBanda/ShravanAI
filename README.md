@@ -27,12 +27,12 @@ not inside it) for the full design rationale.
 - [x] Detection pipeline (XGBoost baseline): windowing, 54 handcrafted
       features, subject-aware train/val/test split, training,
       evaluation, and inference all built (`detection/`,
-      `scripts/train_detection_model.py`), 183 tests passing, real
-      end-to-end integration smoke test on synthetic data (86% test
-      accuracy, 80% recall). **Not yet run against the real full
-      harmonized dataset** -- run
-      `python scripts/train_detection_model.py` and check
-      `results/detection_model/evaluation_report.json`. Known scope
+      `scripts/train_detection_model.py`), 183 tests passing.
+      **REAL production run complete** (`--datasets sisfall`, full
+      38-subject real SisFall data): test-set accuracy 0.860, recall
+      0.819, ROC-AUC 0.928 on genuinely held-out subjects. KFall
+      currently contributes 0% (only 1 real subject downloaded so far
+      -- download more for real cross-dataset training). Known scope
       limits (deliberate, not oversights): coarse whole-trial labels,
       no raw-signal deep model / domain adaptation, no formal LOSO/LODO
       (see PROJECT_CHECKPOINT.md).

@@ -1,15 +1,13 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after completing Stage 6 (detection pipeline, XGBoost
-baseline, end to end -- features, subject-aware split, training,
-evaluation, inference, all built and tested: 183 tests passing). NOT
-yet run against the real full harmonized dataset -- only against
-synthetic-but-realistic smoke-test data in this sandbox, since real
-KFall/SisFall data isn't available here. Run
-`python scripts/train_detection_model.py` against your real
-`data/harmonized/manifest.parquet` next and report back the real
-metrics. See Stage 6 section below for full detail and known,
-deliberate scope limitations.
+Last updated: after the first REAL production run of the detection
+pipeline (`--datasets sisfall`, full real 38-subject SisFall data):
+test-set accuracy 0.860, recall 0.819, ROC-AUC 0.928 on genuinely
+held-out subjects. KFall currently contributes 0% (only 1 real subject,
+SA06, downloaded so far -- more needed for cross-dataset training). A
+real features-cache bug (dataset-selection-unaware cache path) was
+found and fixed in the process. See Stage 6 section below for full
+detail.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -890,10 +888,53 @@ this sandbox because real KFall/SisFall data isn't available here (see
 this checkpoint's running pattern: infrastructure is built and tested
 here, then handed off to be run against real data). This proves the
 CODE PATH works correctly end to end -- it says nothing about real-world
-model quality. Running `python scripts/train_detection_model.py`
-against the real, full `data/harmonized/manifest.parquet` (both
-datasets fully harmonized as of Stage 5) is the next step, and hasn't
-happened yet as of this checkpoint entry.
+model quality.
+
+---
+
+#### REAL-DATA MILESTONE: first production run, `--datasets sisfall`
+
+Running `python scripts/train_detection_model.py` against the full
+real `data/harmonized/manifest.parquet` immediately surfaced a real
+DATA gap, not a code bug: **only 1 KFall subject (SA06) has ever been
+downloaded locally** (unchanged since Stage 3/Task 3.11), vs. all 38
+real SisFall subjects. `split_by_subject`'s "need >=3 subjects per
+dataset" check correctly refused to silently produce a meaningless
+1-subject "split" for KFall -- exactly the failure mode that check
+exists to catch. KFall currently contributes 0% to any trained model
+until more real subjects are downloaded (same Kaggle-mirror process
+used in Stage 2).
+
+**Real bug found and fixed in the process**: `train_detection_model.py`
+cached features to a single fixed `features_cache.parquet` path
+regardless of `--datasets`. Re-running with `--datasets sisfall` after
+an earlier full-manifest run would have SILENTLY loaded the wrong
+(all-datasets) cached features rather than recomputing -- caught before
+it produced a misleading result, not after. Fixed: cache filename now
+encodes the dataset selection (`features_cache_all.parquet` vs.
+`features_cache_sisfall.parquet`), verified with a real two-run test
+confirming both files are written separately.
+
+**Real production result** (`--datasets sisfall`, full real 38-subject
+SisFall data, genuinely held-out subjects, zero leakage):
+- 74,821 windows, 38 subjects -- split 26 train / 6 val / 6 test
+- Test set (9,424 windows, 6 real subjects the model never trained on):
+  **accuracy 0.860, precision 0.648, recall 0.819, F1 0.723, ROC-AUC
+  0.928**
+- Confusion matrix: TN=6388, FP=936, FN=380, TP=1720
+
+ROC-AUC 0.93 indicates a genuinely strong learned signal, not luck --
+the precision/recall numbers are for the default 0.5 threshold
+specifically and can be shifted toward higher recall (fewer missed
+falls, more false alarms) without retraining, if that's the right
+tradeoff for the eventual use case. Recall/precision are likely
+somewhat understated by the known whole-trial label-noise limitation
+(pre-fall/post-fall windows within a fall trial are labeled "fall" but
+don't look like one).
+
+This is the first genuinely real, held-out-subject result this project
+has produced -- a real milestone, even though it's SisFall-only pending
+more KFall subjects.
 
 **Known, deliberate limitations of this first complete version** (not
 oversights -- documented tradeoffs, consistent with the "simple
