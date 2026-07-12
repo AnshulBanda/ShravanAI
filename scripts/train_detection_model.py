@@ -64,7 +64,13 @@ def main() -> None:
           f"({int((windows_df['label'] == 1).sum())} fall-labeled, "
           f"{int((windows_df['label'] == 0).sum())} adl-labeled)")
 
-    features_cache_path = output_dir / "features_cache.parquet"
+    # Cache filename encodes which datasets were actually used, so
+    # re-running with a DIFFERENT --datasets selection (e.g. first the
+    # full manifest, then --datasets sisfall only) never silently loads
+    # a cache built for a different dataset selection -- that would
+    # otherwise train on the wrong data without any error or warning.
+    datasets_tag = "_".join(sorted(args.datasets)) if args.datasets else "all"
+    features_cache_path = output_dir / f"features_cache_{datasets_tag}.parquet"
     if features_cache_path.exists() and not args.force_recompute_features:
         print(f"Loading cached features from {features_cache_path}...")
         features_df = pd.read_parquet(features_cache_path)
