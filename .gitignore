@@ -11,6 +11,8 @@ data/harmonized/*
 !data/harmonized/.gitkeep
 data/external/*
 !data/external/.gitkeep
+data/_quarantine/*
+!data/_quarantine/.gitkeep
 
 # Run outputs
 results/*
