@@ -24,10 +24,18 @@ not inside it) for the full design rationale.
       known gap: only 1 of 7 standing-initiated activity codes was
       individually eyeballed (see PROJECT_CHECKPOINT.md).
 - [ ] Stage 6+ — FallAllD -- see blueprint
-- [ ] Detection pipeline: windowing/dataset layer built (`detection/`,
-      154 tests passing, real-data smoke-tested across both datasets).
-      Not started: feature engineering, model code, train/val/test
-      splitting.
+- [x] Detection pipeline (XGBoost baseline): windowing, 54 handcrafted
+      features, subject-aware train/val/test split, training,
+      evaluation, and inference all built (`detection/`,
+      `scripts/train_detection_model.py`), 183 tests passing, real
+      end-to-end integration smoke test on synthetic data (86% test
+      accuracy, 80% recall). **Not yet run against the real full
+      harmonized dataset** -- run
+      `python scripts/train_detection_model.py` and check
+      `results/detection_model/evaluation_report.json`. Known scope
+      limits (deliberate, not oversights): coarse whole-trial labels,
+      no raw-signal deep model / domain adaptation, no formal LOSO/LODO
+      (see PROJECT_CHECKPOINT.md).
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
 ## Setup
@@ -82,7 +90,7 @@ configs/            YAML configs, composed via `defaults:` (see shared/config.py
 shared/              Code used by BOTH pipelines — readers, harmonization,
                      windowing, folds, metrics, tracking. No pipeline-specific
                      logic lives here.
-detection/           Fall detection pipeline (windowing/dataset layer built; model TBD)
+detection/           Fall detection pipeline (COMPLETE: windowing, features, split, XGBoost model, inference)
 prediction/          Fall prediction pipeline (not yet built)
 scripts/             Thin CLI entry points
 tests/               pytest suite + synthetic fixtures

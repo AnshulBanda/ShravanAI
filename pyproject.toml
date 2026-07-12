@@ -10,6 +10,8 @@ dependencies = [
     "openpyxl",
     "pyarrow",
     "matplotlib",
+    "scikit-learn",
+    "xgboost",
 ]
 
 [project.optional-dependencies]

@@ -5,5 +5,7 @@ omegaconf
 openpyxl
 pyarrow
 matplotlib
+scikit-learn
+xgboost
 pytest
 # wandb   # uncomment once you're ready to use real experiment tracking

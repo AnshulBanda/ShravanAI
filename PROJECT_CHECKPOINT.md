@@ -1,12 +1,15 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after starting Stage 6 (detection pipeline windowing/
-dataset layer). Stage 5 (SisFall harmonization) is complete -- see its
-section for the one remaining honest gap. Stage 6's `detection/`
-package (windowing + windows-manifest + window-loading) is built,
-tested (154 total), and real-data smoke-tested across both datasets
-combined. No model code, feature engineering, or train/val/test
-splitting yet -- see Stage 6 section below for exact scope.
+Last updated: after completing Stage 6 (detection pipeline, XGBoost
+baseline, end to end -- features, subject-aware split, training,
+evaluation, inference, all built and tested: 183 tests passing). NOT
+yet run against the real full harmonized dataset -- only against
+synthetic-but-realistic smoke-test data in this sandbox, since real
+KFall/SisFall data isn't available here. Run
+`python scripts/train_detection_model.py` against your real
+`data/harmonized/manifest.parquet` next and report back the real
+metrics. See Stage 6 section below for full detail and known,
+deliberate scope limitations.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -700,7 +703,7 @@ but worth knowing if calibration quality issues ever surface downstream.
 
 ---
 
-### Stage 6 — IN PROGRESS (detection pipeline: windowing/dataset layer)
+### Stage 6 — COMPLETE (detection pipeline, XGBoost baseline, end to end)
 
 Started building `detection/` -- the first layer of the detection
 pipeline (binary fall/ADL classification, using BOTH KFall and SisFall
@@ -769,13 +772,146 @@ context), ran `build_windows_manifest` against it, and loaded real
 window arrays end-to-end -- correct shapes, correct labels, correct
 padding, for both kfall and sisfall trials in the same run.
 
-**Not yet done**: feature engineering (§5 of the blueprint -- handcrafted
-features for an XGBoost branch), any actual model code, train/val/test
-splitting (LOSO/LODO, informed by `global_subject_id` above), and the
-label-noise question the blueprint itself flags (whole-trial labels
-applied to every window, including pre-fall/post-fall windows within a
-fall trial that don't actually contain the fall). None of this is
-started -- this pass only covers windowing + labeling.
+**Not yet done (at the end of the windowing-only pass)**: feature
+engineering, model code, splitting, training. All of the below was
+built in a follow-up pass to take the pipeline the rest of the way,
+per explicit instruction to finish the detection pipeline completely
+rather than leave it at windowing.
+
+---
+
+#### Feature engineering: `detection/features.py`
+
+54 handcrafted features per window -- standard IMU/HAR feature set, not
+exotic: per-channel time-domain stats (mean/std/min/max/range/rms x 6
+channels = 36), acceleration/gyro magnitude stats (7), jerk (rate of
+change of acceleration magnitude -- the classic "sudden deceleration on
+impact" signal, 2 features), tilt angle from vertical (postural change,
+3 features), signal magnitude area (1), and 3 simple frequency-domain
+features (dominant frequency, spectral energy, spectral entropy) on the
+acceleration-magnitude signal. `FEATURE_NAMES` is derived FROM
+`compute_window_features` itself (calling it once on a dummy window at
+import time) specifically so it can never silently drift out of sync
+with the function that actually produces those keys.
+
+**One test-writing mistake caught before it became a wrong assertion**:
+a test asserted a 5Hz sinusoid on one axis should produce a ~5Hz
+dominant-frequency feature. It doesn't -- the feature is computed on
+acceleration MAGNITUDE, and `sqrt(sin(2*pi*f*t)^2 + const^2)` has its
+fundamental period at `2f`, a standard property of squaring a
+sinusoid. Verified numerically (confirmed a real 5Hz input signal does
+produce a 10Hz peak in the magnitude's spectrum) before fixing the
+test's expectation -- the feature code was correct; my first test
+assertion about it wasn't.
+
+Tests: `tests/test_features.py` (10 tests, including degenerate-input
+cases: an all-zero window must not crash or produce NaN/inf, since a
+tilt-angle divide-by-zero and an all-zero FFT are both real edge cases
+a live pipeline will eventually hit).
+
+#### Subject-aware splitting: `detection/split.py`
+
+`split_by_subject`: splits by SUBJECT (via `global_subject_id`), not by
+window -- a per-window random split would leak, since overlapping
+windows (50% stride) from the same subject's same trial share most of
+their samples. Also splits WITHIN each dataset separately then
+combines, so train/val/test are each guaranteed to contain BOTH KFall
+and SisFall subjects rather than risking one dataset dominating a
+random subject-level split. Hard post-condition
+(`_assert_no_subject_leakage`) checked before every return, not just
+intended -- raises `AssertionError` (not a silent bug) if it's ever
+violated.
+
+Tests: `tests/test_split.py` (8 tests: no-leakage, full coverage,
+both-datasets-present-in-every-split, reproducibility with a fixed seed,
+genuinely differs with a different seed, and a clear error -- not a
+cryptic sklearn one -- when a dataset has too few subjects to split).
+
+#### Model: `detection/model.py`
+
+Thin, deliberately unglamorous XGBoost wrapper: `train_model` (fits on
+train, early-stops on val, and computes `scale_pos_weight` from the
+TRAIN split's actual class balance by default -- fall trials are a
+minority class in both datasets, and leaving this at XGBoost's default
+of 1.0 would bias toward under-predicting the class that matters most
+to catch) and `evaluate_model` (accuracy/precision/recall/F1/ROC-AUC/
+confusion matrix -- recall called out explicitly as the metric that
+matters most for a fall detector, since a missed fall is far costlier
+than a false alarm). `save_model`/`load_model` round-trip through
+XGBoost's own JSON format.
+
+Tests: `tests/test_model.py` (7 tests, including an actual
+learn-a-real-signal test -- synthetic features with one column
+deliberately correlated with the label, confirming the trained model
+achieves >85% accuracy on it, not just that training doesn't crash --
+and a save/load round-trip that checks predictions match exactly, not
+just that the file exists).
+
+#### Inference: `detection/predict.py`
+
+`predict_from_manifest` (batch: trial manifest -> windows -> features
+-> predictions, for evaluating on a held-out real test set) and
+`predict_single_window` (one raw window in, prediction out, for ad hoc
+use). Tests: `tests/test_predict.py` (4 tests).
+
+#### Training CLI: `scripts/train_detection_model.py`
+
+End-to-end entry point: trial manifest -> windows -> features (cached
+to `results/detection_model/features_cache.parquet` so re-runs don't
+recompute from scratch) -> subject-aware split -> train -> evaluate on
+test -> save model + a JSON report (`evaluation_report.json`) with
+every metric plus split sizes, for a permanent record of what a given
+model run actually achieved.
+
+#### Real end-to-end integration smoke test (not just unit tests)
+
+Built a SYNTHETIC-but-realistic 40-trial, 10-subject (5 KFall + 5
+SisFall), both-labels dataset -- real harmonized-format parquet files
+with an actual designed jerk-spike signal for fall trials, referenced
+by a real trial manifest (same `ManifestRow`/`write_manifest` machinery
+Stage 4 already uses) -- then ran the FULL CLI
+(`train_detection_model.py`) against it. Real output, not fabricated:
+105 windows across 10 subjects, subject-aware split (train=61/val=22/
+test=22, 6/2/2 subjects), trained model, test-set evaluation: accuracy
+0.864, precision 0.667, recall 0.800, F1 0.727, ROC-AUC 0.847. Also
+verified `predict_from_manifest` and `predict_single_window` both work
+against the saved model afterward -- a spiky synthetic window correctly
+scored a higher fall-probability than a quiet one (0.132 vs 0.121),
+though neither crossed the 0.5 threshold with this deliberately tiny
+(61-training-window) smoke-test model -- an honest small-data
+limitation of the SMOKE TEST specifically, not a code defect; the real
+signal is the test-set metrics above, which show the full chain
+actually learns and generalizes to held-out subjects on realistic
+synthetic data.
+
+**IMPORTANT -- what this is and isn't**: every metric above is on
+SYNTHETIC data designed to have a learnable jerk signal, generated in
+this sandbox because real KFall/SisFall data isn't available here (see
+this checkpoint's running pattern: infrastructure is built and tested
+here, then handed off to be run against real data). This proves the
+CODE PATH works correctly end to end -- it says nothing about real-world
+model quality. Running `python scripts/train_detection_model.py`
+against the real, full `data/harmonized/manifest.parquet` (both
+datasets fully harmonized as of Stage 5) is the next step, and hasn't
+happened yet as of this checkpoint entry.
+
+**Known, deliberate limitations of this first complete version** (not
+oversights -- documented tradeoffs, consistent with the "simple
+baseline done properly first" scope decision):
+- Coarse whole-trial labels: every window in a fall trial is labeled
+  "fall," including pre-fall walking and post-fall lying-still windows
+  that don't actually contain the fall event itself. The blueprint
+  flags this explicitly as expected label noise, not a bug to fix here.
+- No raw-signal deep-learning branch and no domain-adversarial
+  cross-dataset adaptation (both in the original blueprint's more
+  ambitious two-branch ensemble design) -- deliberately deferred; this
+  is the "XGBoost baseline done properly" scope, not the full ensemble.
+- No formal LOSO/LODO cross-validation report (research-grade, more
+  appropriate for a paper's headline number) -- a single subject-aware
+  train/val/test split was used instead, which is the right choice for
+  "get real predictions on held-out data" rather than an exhaustive
+  academic evaluation. `global_subject_id` makes adding LOSO/LODO later
+  straightforward if needed.
 
 ---
 
