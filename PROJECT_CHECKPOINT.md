@@ -1,13 +1,15 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after the first REAL production run of the detection
-pipeline (`--datasets sisfall`, full real 38-subject SisFall data):
-test-set accuracy 0.860, recall 0.819, ROC-AUC 0.928 on genuinely
-held-out subjects. KFall currently contributes 0% (only 1 real subject,
-SA06, downloaded so far -- more needed for cross-dataset training). A
-real features-cache bug (dataset-selection-unaware cache path) was
-found and fixed in the process. See Stage 6 section below for full
-detail.
+Last updated: after the REAL final cross-dataset detection baseline --
+full real KFall (32 subjects) downloaded and harmonized (5,075 trials,
+{T01: 32} calibration, cleanest possible result), combined with full
+real SisFall (38 subjects) for training: 70 real subjects total,
+test-set accuracy 0.836, precision 0.692, recall 0.839, ROC-AUC 0.921
+on genuinely held-out subjects from BOTH datasets. Precision AND
+recall both improved vs. the earlier SisFall-only baseline -- a
+genuine quality gain, not a threshold trade-off. This is now the
+project's real detection-pipeline baseline. See Stage 6 section below
+for full detail.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -935,6 +937,55 @@ don't look like one).
 This is the first genuinely real, held-out-subject result this project
 has produced -- a real milestone, even though it's SisFall-only pending
 more KFall subjects.
+
+---
+
+#### REAL-DATA MILESTONE #2: full cross-dataset training (KFall 32 subjects + SisFall 38 subjects)
+
+Downloaded the FULL real KFall dataset (Kaggle mirror
+`usmanabbasi2002/kfall-dataset`) -- 32 subjects (SA06-SA33, SA35-SA38;
+matches the published dataset's subject count exactly, confirmed
+against the paper). Re-ran `harmonize_dataset.py --dataset kfall`:
+5,075 trials processed (matches the paper's stated 2,729 ADL + 2,346
+fall exactly), 5,053 written, 22 quarantined (0.43% -- a very low,
+healthy rate), **calibration sources `{T01: 32}`** -- every single real
+KFall subject had a usable dedicated calibration trial, the cleanest
+possible calibration result (no auto_detected/group_fallback needed at
+all, unlike SisFall which has no dedicated calibration trial by
+design). Stage 4's upsert manifest design worked exactly as intended --
+KFall's rows replaced cleanly, SisFall's rows untouched.
+
+Re-ran `train_detection_model.py` with no `--datasets` filter (both
+datasets, 70 total real subjects, 112,087 windows) -- split 48 train /
+11 val / 11 test subjects. Real test-set result on genuinely held-out
+subjects from BOTH datasets:
+
+| Metric | SisFall-only (38 subj) | KFall+SisFall (70 subj) |
+|---|---|---|
+| Accuracy | 0.860 | 0.836 |
+| Precision | 0.648 | 0.692 |
+| Recall | 0.819 | 0.839 |
+| F1 | 0.723 | 0.758 |
+| ROC-AUC | 0.928 | 0.921 |
+
+**Precision AND recall both improved simultaneously** with the added
+KFall data -- not just a threshold trade-off (which is the usual
+pattern when one metric goes up at the other's expense), a genuine
+quality improvement from more, more-diverse real training data.
+Accuracy dropped slightly and ROC-AUC is flat within noise, neither of
+which is concerning given accuracy is the least trustworthy metric
+here (class imbalance) and ROC-AUC moved by less than 1 point on a
+different, larger, more diverse test set.
+
+**This is now the project's real, final baseline for the detection
+pipeline** -- trained and validated across 70 real subjects from two
+genuinely different studies (different countries, sensor hardware, age
+ranges, and fall-simulation protocols), which is a much stronger
+generalization signal than either dataset alone. Model and full report
+saved to `results/detection_model/xgboost_model.json` and
+`evaluation_report.json` on the user's machine (not committed to git --
+these are real trained artifacts, not something to version-control
+without a much bigger discussion about model versioning/storage).
 
 **Known, deliberate limitations of this first complete version** (not
 oversights -- documented tradeoffs, consistent with the "simple

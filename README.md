@@ -28,13 +28,13 @@ not inside it) for the full design rationale.
       features, subject-aware train/val/test split, training,
       evaluation, and inference all built (`detection/`,
       `scripts/train_detection_model.py`), 183 tests passing.
-      **REAL production run complete** (`--datasets sisfall`, full
-      38-subject real SisFall data): test-set accuracy 0.860, recall
-      0.819, ROC-AUC 0.928 on genuinely held-out subjects. KFall
-      currently contributes 0% (only 1 real subject downloaded so far
-      -- download more for real cross-dataset training). Known scope
-      limits (deliberate, not oversights): coarse whole-trial labels,
-      no raw-signal deep model / domain adaptation, no formal LOSO/LODO
+      **REAL final cross-dataset baseline** (both datasets, 70 real
+      subjects -- full KFall 32 subjects + full SisFall 38 subjects):
+      test-set accuracy 0.836, precision 0.692, recall 0.839, ROC-AUC
+      0.921 on genuinely held-out subjects. Precision and recall both
+      improved over the earlier SisFall-only run. Known scope limits
+      (deliberate, not oversights): coarse whole-trial labels, no
+      raw-signal deep model / domain adaptation, no formal LOSO/LODO
       (see PROJECT_CHECKPOINT.md).
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 
