@@ -1,15 +1,27 @@
 # Project Checkpoint — Fall Detection & Prediction Pipelines
 
-Last updated: after the REAL final cross-dataset detection baseline --
-full real KFall (32 subjects) downloaded and harmonized (5,075 trials,
-{T01: 32} calibration, cleanest possible result), combined with full
-real SisFall (38 subjects) for training: 70 real subjects total,
-test-set accuracy 0.836, precision 0.692, recall 0.839, ROC-AUC 0.921
-on genuinely held-out subjects from BOTH datasets. Precision AND
-recall both improved vs. the earlier SisFall-only baseline -- a
-genuine quality gain, not a threshold trade-off. This is now the
-project's real detection-pipeline baseline. See Stage 6 section below
-for full detail.
+Last updated: Stage 7 (prediction pipeline windowing + onset/impact
+labeling) REAL-DATA VERIFIED against the full real KFall manifest --
+348,941 total windows across all KFall prediction-eligible trials:
+non_fall 249,970 (71.6%), fall 83,059 (23.8%), pre_impact 15,912
+(4.6%) -- pre_impact is the rare class, exactly as the blueprint
+predicted. Spot-checked SA06 T22 R01 (onset=130, impact=208, the same
+real trial from the Stage 3 REAL-DATA MILESTONE) frame-by-frame: the
+non_fall->pre_impact transition lands exactly at the window ending at
+frame 140 (the first window whose end_frame=130 stays non_fall, per
+the strictly-past-onset rule), and the pre_impact->fall transition
+lands exactly at the window starting at frame 110 (end_frame=210,
+first window past impact=208) -- an exact match, not an approximation.
+See Stage 7 section below for full detail.
+
+Detection pipeline's real final cross-dataset baseline (Stage 6, real
+data, both datasets) remains fully verified: full real KFall (32
+subjects) downloaded and harmonized (5,075 trials, {T01: 32}
+calibration, cleanest possible result), combined with full real
+SisFall (38 subjects) for training: 70 real subjects total, test-set
+accuracy 0.836, precision 0.692, recall 0.839, ROC-AUC 0.921 on
+genuinely held-out subjects from BOTH datasets. See Stage 6 section
+below for full detail.
 
 **Purpose of this file:** a durable, factual record of decisions and
 verified-against-real-data findings, kept in the repo itself
@@ -1119,3 +1131,138 @@ that contradicts these, trust this checkpoint over a fresh guess:
   watch the `calibration_source_counts` breakdown -- this is the
   ongoing real-world check that Tasks 3.4-3.6's fallback logic is
   behaving as designed, not just working for SA06.
+---
+
+### Stage 7 — IN PROGRESS (prediction pipeline: windowing + onset/impact labeling, NOT yet real-data verified)
+
+Started `prediction/` -- the first layer of the prediction pipeline
+(3-class pre-impact classification, KFall-only). Scope for this pass,
+same "one layer at a time" approach as detection's Stage 6: turn the
+trial-level manifest into a WINDOW-level manifest with frame-precise
+onset/impact labels + a window-loading function. No model code yet.
+
+**Small refactor first**: `generate_window_specs`/`WindowSpec`/
+`WindowingConfig` moved from `detection/windowing.py` to a new
+`shared/windowing.py` -- the boundary math was already fully generic
+(no detection-specific assumption anywhere in it), and the blueprint
+explicitly rules out `prediction/` importing from `detection/`
+directly. `detection/windowing.py` now just re-exports from
+`shared/windowing.py` with its original defaults -- verified as a true
+no-op by running the full pre-existing 183-test suite unchanged before
+adding anything new; all 183 passed.
+
+**`prediction/windowing.py`**: `PredictionWindowingConfig`, dense
+defaults per the blueprint's Pipeline 2 §3 spec -- 1.0s window (100
+samples @ 100Hz), 0.1s stride (10-sample dense overlap), vs.
+detection's 2.0s/1.0s. Rationale for the density: the pipeline's core
+metric is lead time (ms before impact the model first flags
+`pre_impact`), which needs fine temporal resolution to measure at all.
+
+**`prediction/labelers.py`**: `onset_impact_label()`, the 3-class
+scheme from the blueprint §4 (`non_fall` / `pre_impact` / `fall`),
+kept as its own module rather than folded into `dataset.py` (the
+blueprint explicitly calls this out as worth keeping separate/
+independently-testable from detection's whole-trial labeler). Real
+design decision made explicit here: a 1.0s window can be comparable in
+length to or longer than an entire ~0.6-1.0s KFall fall event, so a
+single window can legitimately overlap BOTH the onset->impact interval
+AND extend past the impact frame -- the three classes are NOT
+naturally mutually exclusive by raw overlap alone. Resolved with an
+explicit precedence rule: `fall` wins over `pre_impact` whenever a
+window's frame range reaches the impact frame, on the reasoning that a
+window containing the actual impact is the more safety-relevant state
+to report distinctly. This precedence is a judgment call, not derived
+from the blueprint text directly -- worth revisiting once real KFall
+confusion-matrix behavior is visible (see Known open items below).
+
+**`prediction/dataset.py`**: `build_windows_manifest` (filters via
+`shared.manifest.query_prediction_trials` -- already existed from
+Stage 4, unmodified) + `load_window` (identical edge-padding contract
+to detection's: repeat the last real sample, not zero-pad). Duplicated
+rather than shared with `detection/dataset.py`'s version, per the
+blueprint's no-cross-import rule between the two pipelines.
+
+**KNOWN GAP, flagged rather than silently worked around**: the
+blueprint's Pipeline 2 §1 says prediction should keep KFall's full
+channel set including the pre-fused Euler angles ("no need to restrict
+channels ... since you're single-dataset"). But the harmonization
+pipeline as ALREADY BUILT (Stage 3, real-data-verified) drops Euler
+angles for every trial at harmonization time, before either pipeline
+sees the data -- `shared/harmonize/pipeline.py`'s own docstring already
+anticipated this: "Callers who want KFall's Euler angles for a
+KFall-only experiment should read them from the original trial.signal
+directly, before harmonization." So `prediction/dataset.py` currently
+operates on the same 6 acc_*/gyro_* channels as detection, NOT Euler.
+Fixing this would mean either re-harmonizing KFall with a per-dataset
+channel policy (a change to the already-verified harmonization
+pipeline, not a prediction-side change) or bypassing the harmonized
+layer for this one pipeline. Deliberately not decided yet -- worth a
+real conversation before touching Stage 3's code.
+
+**Tests**: `tests/test_prediction_labelers.py`,
+`tests/test_prediction_windowing.py`,
+`tests/test_prediction_dataset.py` -- all against synthetic fixture
+data (including the project's own real SA06 T22 R01 onset=130/
+impact=208 values as test inputs, per the Stage 3 REAL-DATA MILESTONE
+section above, though the surrounding trial/signal data in these tests
+is still synthetic, not the real file). Full suite: 201 passed (183
+original + 18 new), zero regressions.
+
+**REAL-DATA MILESTONE (windowing + labeling)**: ran
+`build_windows_manifest` against the full real
+`data/harmonized/manifest.parquet` (real KFall, all subjects). Real
+output, not fabricated:
+
+| label | count | % |
+|---|---|---|
+| non_fall | 249,970 | 71.6% |
+| fall | 83,059 | 23.8% |
+| pre_impact | 15,912 | 4.6% |
+
+Total: 348,941 windows. `pre_impact` is the rare class at the real
+dataset level, confirming the blueprint's prediction (this was
+explicitly NOT guaranteed by the earlier synthetic single-trial test,
+per that test's own caveat comment -- now confirmed for real).
+
+Frame-level spot check, SA06 T22 R01 (onset=130, impact=208 -- the
+same real trial verified in Stage 3's REAL-DATA MILESTONE):
+
+```
+start_frame  end_frame  label
+30           130        non_fall     <- ends exactly at onset, not past it
+40           140        pre_impact   <- first window past onset
+100          200        pre_impact   <- last window before impact
+110          210        fall         <- first window past impact
+```
+
+Both transitions land exactly where `onset_impact_label`'s documented
+boundary rules predict, frame-for-frame -- not approximately. This
+closes out the windowing/labeling stage as real-data verified, same
+bar as Stage 3's calibration/harmonization milestone.
+
+**NOT yet done / explicitly deferred** (unchanged by the above --
+these are the next real layers, not verification gaps):
+- Feature engineering (rolling accel magnitude/jerk, tilt-angle
+  deviation from baseline) -- blueprint §5, not started.
+- Model code (ConvLSTM / tiny-Transformer branches) -- blueprint §6,
+  not started.
+- LOSO evaluation + lead-time metric -- blueprint §7-8, not started.
+- The Euler-angle channel gap above.
+
+## Known open items / things to double check later (Stage 7 additions)
+
+- Run `build_windows_manifest` against the real KFall manifest once
+  available locally and inspect the real `label` distribution -- confirm
+  `pre_impact` really is the rare class as the blueprint predicts, and
+  that this isn't an artifact of the synthetic single-trial test setup
+  (see that test's own caveat comment in `test_prediction_dataset.py`).
+- The `fall`-wins precedence rule in `onset_impact_label` (documented
+  above) is a judgment call, not derived from the blueprint text
+  directly -- worth revisiting once a real per-class confusion matrix
+  is visible (this is also the point at which the blueprint says to
+  decide whether to collapse to binary pre-impact/not, if 3-class
+  proves too noisy).
+- The Euler-angle channel gap (see above) -- decide before building
+  the feature-engineering stage, since blueprint §5's tilt-angle
+  feature may want Euler directly rather than re-deriving orientation
+  from filtered accel/gyro.
