@@ -37,16 +37,17 @@ not inside it) for the full design rationale.
       raw-signal deep model / domain adaptation, no formal LOSO/LODO
       (see PROJECT_CHECKPOINT.md).
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
-- [ ] Stage 7 — Prediction pipeline (IN PROGRESS, NOT real-data
-      verified yet): `prediction/windowing.py` (dense 1.0s/0.1s config
-      per blueprint Pipeline 2 §3), `prediction/labelers.py` (3-class
-      onset/impact labeling, §4), `prediction/dataset.py` (windows
-      manifest + window loading). 18 new tests, 201 total passing
-      against synthetic fixtures. Known gap: harmonized signal lacks
-      Euler angles the blueprint calls for here (see
-      PROJECT_CHECKPOINT.md Stage 7). Not started yet: feature
-      engineering, ConvLSTM/tiny-Transformer models, LOSO + lead-time
-      evaluation.
+- [ ] Stage 7 — Prediction pipeline (IN PROGRESS): windowing +
+      onset/impact labeling REAL-DATA VERIFIED (348,941 real KFall
+      windows: non_fall 71.6%, fall 23.8%, pre_impact 4.6%; frame-exact
+      spot check on SA06 T22 R01). Feature engineering
+      (`prediction/features.py`, rolling accel-magnitude/jerk/tilt-
+      deviation auxiliary channels per blueprint §5) built, NOT yet
+      real-data verified. 212 tests passing against synthetic
+      fixtures. Known gap: harmonized signal lacks Euler angles the
+      blueprint calls for here (see PROJECT_CHECKPOINT.md Stage 7).
+      Not started yet: ConvLSTM/tiny-Transformer models, LOSO +
+      lead-time evaluation.
 
 ## Setup
 

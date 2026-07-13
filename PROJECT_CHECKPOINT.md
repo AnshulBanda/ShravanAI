@@ -1266,3 +1266,67 @@ these are the next real layers, not verification gaps):
   the feature-engineering stage, since blueprint §5's tilt-angle
   feature may want Euler directly rather than re-deriving orientation
   from filtered accel/gyro.
+
+---
+
+### Stage 7 continued — Feature engineering (auxiliary channels for the deep branch), NOT yet real-data verified
+
+**`prediction/features.py`**: `compute_auxiliary_channels`, per the
+blueprint's Pipeline 2 §5. Structurally different from
+`detection/features.py`'s feature engineering, not just a smaller
+version of it -- detection produces ONE aggregate scalar vector per
+window (feeding the XGBoost branch); this produces ROLLING, per-sample
+channels the SAME LENGTH as the input window, meant to be concatenated
+onto the raw 6-channel signal as extra input channels for the deep
+model (ConvLSTM/tiny-Transformer, still not built) rather than a
+separate tabular feature matrix. The blueprint is explicit about why:
+aggregate stats over a 1.0s/dense-stride window "would be extremely
+noisy and expensive" here.
+
+Two channels computed, per the blueprint:
+1. **Rolling acceleration magnitude** -- plain Euclidean norm of the
+   3-axis acceleration, per sample.
+2. **Jerk** -- first derivative of accel magnitude. Uses `np.gradient`
+   (central differences, same-length output), NOT `detection/
+   features.py`'s `np.diff` (which shortens the array by one) --
+   `np.diff` would misalign this channel against the raw signal by one
+   sample if used per-sample here; that shortening was harmless in
+   detection only because it fed into an aggregate stat, not an
+   aligned channel.
+3. **Tilt-angle deviation from calibrated standing baseline** -- angle
+   (degrees) between the acceleration vector and canonical vertical
+   (z-axis). Real clarification worth recording: this is NOT an
+   approximation of "deviation from baseline" -- it IS that quantity,
+   exactly, by construction. `shared/harmonize/axis_alignment.py`
+   already rotates every trial so the subject's calibrated standing
+   orientation becomes the canonical z-axis, so angle-from-z on the
+   already-harmonized signal already IS angle-from-the-calibrated-
+   baseline. Same formula as detection's `tilt_mean`/`tilt_std`,
+   computed per-sample here instead of aggregated.
+
+`augment_window()` concatenates raw (6) + auxiliary (3) = 9 channels,
+in `CHANNELS + AUX_CHANNEL_NAMES` order. `load_augmented_window()`
+combines `prediction.dataset.load_window` + `augment_window` in one
+call -- this is the function a model's data loader will actually call
+per window, once model code exists.
+
+**Tests**: `tests/test_prediction_features.py`, 11 tests, all against
+hand-computable synthetic vectors (pure-vertical -> 0deg tilt,
+pure-horizontal -> 90deg tilt, linear ramp -> exact expected jerk
+slope, constant-magnitude -> zero jerk, degenerate all-zero window
+guarded not crashed). Full suite: 212 passed (201 prior + 11 new),
+zero regressions.
+
+**NOT yet done / explicitly deferred** (unchanged focus areas):
+- Real-data verification of the auxiliary channels against a real
+  KFall window (e.g. confirm tilt_deviation_deg looks sane -- roughly
+  near 0 for a standing/T01 window, and spikes meaningfully during a
+  real T22 fall window -- the equivalent of Stage 3's "spot-check 2-3
+  real trials by eye" step, not yet done here).
+- Model code (ConvLSTM / tiny-Transformer branches) -- blueprint §6.
+- LOSO evaluation + lead-time metric -- blueprint §7-8.
+- The Euler-angle channel gap (Stage 7 first section, above) --
+  becomes more relevant now: the blueprint's tilt-angle feature idea
+  may have been written assuming Euler angles were available directly,
+  though the acc-vector-angle approach used here (matching detection)
+  is a reasonable, already-precedented substitute, not obviously worse.
