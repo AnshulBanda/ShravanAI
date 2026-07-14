@@ -1330,3 +1330,64 @@ zero regressions.
   may have been written assuming Euler angles were available directly,
   though the acc-vector-angle approach used here (matching detection)
   is a reasonable, already-precedented substitute, not obviously worse.
+
+---
+
+### Stage 7 continued — LOSO fold construction + PyTorch data-loading layer, NOT yet real-data verified
+
+Two more layers, prerequisite infra for model code (not the models
+themselves yet):
+
+**`prediction/loso.py`**: `generate_loso_folds()` (one fold per
+subject, deterministically sorted) + `get_fold_masks()` (boolean
+train/test masks, not copied DataFrames -- avoids an extra full-copy
+per fold when running 32 folds over 348k+ rows). This is the ACTUAL
+leakage-prevention mechanism for this pipeline, per blueprint §8. Kept
+conceptually and physically separate from the batch sampler below --
+see both modules' docstrings for why blueprint §7's "avoid near-
+duplicate windows leaking across train/val" wording, taken literally,
+could be misread as describing the batch sampler instead of this.
+
+**`prediction/torch_dataset.py`**: `PredictionWindowDataset` (one
+manifest row -> one (9, 100) channel-first tensor + label, via
+`load_augmented_window`, with an instance-level per-file signal cache
+-- documented tradeoff: not shared across `DataLoader` worker
+processes) + `TrialGroupedBatchSampler` (shuffles at the trial-group
+level per blueprint §7's "sequence-aware batching," not at the
+individual-window level -- a training-dynamics concern, NOT a leakage-
+prevention one; that's `loso.py`'s job, applied earlier in the
+pipeline, before any Dataset exists).
+
+**Tests**: `tests/test_prediction_loso.py` (6 tests) +
+`tests/test_prediction_torch_dataset.py` (8 tests) = 14 new, all
+against synthetic fixtures. Full suite: 226 passed (212 prior + 14
+new), zero regressions. Also ran a manual end-to-end smoke test wiring
+`generate_loso_folds` -> `get_fold_masks` -> `PredictionWindowDataset`
+-> `TrialGroupedBatchSampler` -> real `torch.utils.data.DataLoader`
+together on synthetic 2-subject data -- confirmed batch output shape
+`(8, 9, 100)`, exactly what a Conv1d-based model expects (batch,
+channels, length). Not a pytest (not worth keeping as a permanent
+test given it doesn't assert anything the unit tests don't already
+cover individually), but worth recording that the pieces were
+confirmed to actually fit together, not just pass in isolation.
+
+**Environment note**: `torch` (2.13.0, CPU/cu130 build from PyPI) had
+to be installed in the sandbox for this stage -- not previously a
+project dependency (detection's XGBoost baseline didn't need it).
+Should be added to whatever `requirements.txt`/`pyproject.toml`
+dependency list the project uses, if it isn't already there locally
+(you likely already have torch installed given the FallTransformer
+work on the SisFall comparison pipeline, but flagging in case the
+`fall-project` environment specifically doesn't).
+
+**NOT yet done / explicitly deferred**:
+- Model architectures (ConvLSTM, tiny-Transformer) -- blueprint §6.
+- Focal loss (more aggressively weighted than Pipeline 1's, per §7).
+- Lead-time metric -- blueprint §7's core reported metric, not built.
+- Training script tying LOSO + Dataset + model + loss together.
+- Real-data verification of this stage specifically (the smoke test
+  above used synthetic data only) -- reasonable to defer until model
+  code exists, since there's nothing meaningfully different to verify
+  about the data-loading layer in isolation against real KFall data
+  beyond what Stage 7's earlier real-data milestone (windowing/
+  labeling) and this stage's synthetic smoke test already cover.
