@@ -44,11 +44,21 @@ not inside it) for the full design rationale.
       (`prediction/features.py`, rolling accel-magnitude/jerk/tilt-
       deviation auxiliary channels per blueprint §5) and LOSO + PyTorch
       data-loading layer (`prediction/loso.py`, `prediction/
-      torch_dataset.py`) built. LOSO REAL-DATA VERIFIED: 32 folds
-      against real KFall (matches subject count exactly); fold 0 train
-      + test windows sum to 348,941, matching the earlier real
-      windowing milestone exactly. 226 tests passing + one manual
-      end-to-end smoke test wiring LOSO -> Dataset -> DataLoader.
+      torch_dataset.py`) built and REAL-DATA VERIFIED (32 LOSO folds
+      against real KFall, matches subject count; fold windows sum
+      exactly to the earlier real windowing total). Model
+      architectures (`prediction/models/convlstm.py`,
+      `prediction/models/tiny_transformer.py`), focal loss
+      (`prediction/losses.py`), and the lead-time metric
+      (`prediction/lead_time.py`) built, NOT yet real-data verified.
+      256 tests passing + manual smoke tests (LOSO->Dataset->
+      DataLoader wiring; real forward+backward+optimizer-step cycle
+      for both model branches using real Stage-7 class-count-derived
+      loss weights). Known gap: harmonized signal lacks Euler angles
+      the blueprint calls for here (see PROJECT_CHECKPOINT.md Stage
+      7). Not started yet: the actual training script tying
+      everything together, and the ConvLSTM-vs-TinyTransformer
+      ablation.
       gap: harmonized signal lacks Euler angles the blueprint calls
       for here (see PROJECT_CHECKPOINT.md Stage 7). Not started yet:
       ConvLSTM/tiny-Transformer models, focal loss, lead-time metric,

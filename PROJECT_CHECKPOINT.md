@@ -1394,3 +1394,91 @@ work on the SisFall comparison pipeline, but flagging in case the
   exactly matching Stage 7's earlier real-data window-count milestone,
   confirming the train/test masks are disjoint and complete against
   real data, not just in the synthetic partition tests.
+
+---
+
+### Stage 7 continued — Model architectures, focal loss, lead-time metric, NOT yet real-data verified
+
+**`prediction/models/convlstm.py`**: CNN (3 conv blocks, 32->64->128
+channels, kernels 5/5/3, same as detection's Branch B for consistency)
+-> unidirectional LSTM (128 hidden) -> 3-class linear head. Real
+architectural choice worth recording: uses a UNIDIRECTIONAL LSTM,
+unlike detection's BiLSTM -- matches Pipeline 2 §6's literal wording
+and the real-time deployment framing (a live caregiver-alert system
+only ever has past frames available), not a copy-paste oversight.
+
+**`prediction/models/tiny_transformer.py`**: ViT-tiny-style -- each of
+the 100 timesteps treated as one 9-dim token, linearly projected to
+`d_model=48`, prepended learnable CLS token, learned positional
+embedding (not sinusoidal -- window length is fixed at exactly 100
+samples by construction, so no need for sinusoidal's length-
+generalization property), 3 encoder layers / 3 heads (matches the
+blueprint's explicit PreFallKD teacher-size reference), CLS token's
+output embedding -> 3-class linear head.
+
+Both branches share an identical input contract --
+`(batch, 9, 100)`, channel-first, matching
+`PredictionWindowDataset`'s output directly -- and identical output
+contract -- raw logits, `(batch, 3)` -- so a training loop can swap
+one for the other without touching anything else. Verified via a
+shared test (`test_both_branches_accept_identical_input_and_produce_
+identical_output_shape`), not just asserted in the docstring.
+
+**`prediction/losses.py`**: 3-class focal loss (`FocalLoss`) + a real
+design decision made explicit: `default_alpha_weights()` builds
+per-class weights via inverse-frequency PLUS an extra multiplier
+specifically on `pre_impact` (default 2.0x), per blueprint §7's
+"more aggressively weighted than Pipeline 1 ... pre-impact is the
+rarest class and the one false negatives matter most clinically."
+The exact 2.0x multiplier isn't from the blueprint (not specified
+there) -- a reasonable starting point, meant to be tuned against a
+real validation confusion matrix once training runs, not treated as
+final.
+
+**`prediction/lead_time.py`**: `compute_lead_time_ms()` -- the actual
+metric blueprint §7 calls "the metric the whole pipeline exists to
+optimize." Per fall trial: ms before the real impact frame that the
+model FIRST predicted `pre_impact`, or `None` if it never did before
+impact (a real, reportable "missed" outcome, not an error -- handled
+explicitly rather than silently scored as 0ms, which would wrongly
+reward never warning at all). `summarize_lead_times()` aggregates
+across trials into `detection_rate` (fraction of falls ever flagged
+in time) + mean/median lead time over the flagged ones only --
+deliberately NOT one blended number, since blueprint §7's whole point
+is distinguishing "flagged late" from "never flagged."
+
+**Tests**: `tests/test_prediction_models.py` (10 tests -- shape,
+gradient-flow-to-every-parameter, batch_size=1 edge case, both
+branches' shared contract), `tests/test_prediction_losses.py` (10
+tests -- focal loss reduces to cross-entropy at gamma=0, correctly
+down-weights confident predictions more aggressively than plain CE,
+alpha scaling verified numerically, `default_alpha_weights` validated
+including its renormalization interaction with the boost multiplier),
+`tests/test_prediction_lead_time.py` (10 tests -- correct first-flag
+frame selection, unsorted-input handling, at/after-impact exclusion,
+detection-rate/mean/median aggregation). 30 new, all against synthetic
+data. Full suite: 256 passed (226 prior + 30 new), zero regressions.
+
+Also ran a manual end-to-end smoke test (not a pytest -- see Stage 7's
+earlier LOSO/Dataset smoke-test note for why): built `default_alpha_
+weights` from the REAL Stage 7 class counts (non_fall=249,970,
+pre_impact=15,912, fall=83,059) -> weights [0.085, 2.66, 0.255] for
+[non_fall, pre_impact, fall] -- pre_impact correctly gets by far the
+highest weight. Ran one real forward+backward+optimizer-step cycle for
+BOTH ConvLSTM and TinyTransformer using this loss -- confirmed loss is
+finite and every parameter actually updates (not just receives a
+nonzero gradient, which the pytest suite already checks separately --
+this confirms the optimizer step itself works end-to-end too).
+
+**NOT yet done / explicitly deferred**:
+- Training script tying LOSO + Dataset/Sampler + model + loss + a real
+  training loop (train/val split within each LOSO fold's training
+  subjects, early stopping, checkpointing) together.
+- Real-data verification of this stage (models/loss/lead-time trained
+  and evaluated on real KFall data) -- can't meaningfully happen until
+  the training script exists.
+- Ablation between ConvLSTM and TinyTransformer (which one, or an
+  ensemble, actually generalizes better on real LOSO splits) --
+  blueprint §6's stated open question, not answerable until both are
+  actually trained.
+- The Euler-angle channel gap (Stage 7, first section) -- still open.
