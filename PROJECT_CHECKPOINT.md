@@ -1385,9 +1385,12 @@ work on the SisFall comparison pipeline, but flagging in case the
 - Focal loss (more aggressively weighted than Pipeline 1's, per §7).
 - Lead-time metric -- blueprint §7's core reported metric, not built.
 - Training script tying LOSO + Dataset + model + loss together.
-- Real-data verification of this stage specifically (the smoke test
-  above used synthetic data only) -- reasonable to defer until model
-  code exists, since there's nothing meaningfully different to verify
-  about the data-loading layer in isolation against real KFall data
-  beyond what Stage 7's earlier real-data milestone (windowing/
-  labeling) and this stage's synthetic smoke test already cover.
+- Real-data verification of the data-loading layer specifically
+  (the smoke test above used synthetic data only) -- **now done**:
+  `generate_loso_folds` against the real KFall windows manifest
+  produced 32 folds (matches KFall's real subject count exactly).
+  `get_fold_masks` on fold 0 (test_subject=kfall_SA06):
+  train_windows=338,494, test_windows=10,447 -- sums to 348,941,
+  exactly matching Stage 7's earlier real-data window-count milestone,
+  confirming the train/test masks are disjoint and complete against
+  real data, not just in the synthetic partition tests.

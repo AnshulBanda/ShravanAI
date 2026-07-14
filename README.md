@@ -44,9 +44,11 @@ not inside it) for the full design rationale.
       (`prediction/features.py`, rolling accel-magnitude/jerk/tilt-
       deviation auxiliary channels per blueprint §5) and LOSO + PyTorch
       data-loading layer (`prediction/loso.py`, `prediction/
-      torch_dataset.py`) built, NOT yet real-data verified. 226 tests
-      passing (synthetic fixtures) + one manual end-to-end smoke test
-      wiring LOSO -> Dataset -> DataLoader on synthetic data. Known
+      torch_dataset.py`) built. LOSO REAL-DATA VERIFIED: 32 folds
+      against real KFall (matches subject count exactly); fold 0 train
+      + test windows sum to 348,941, matching the earlier real
+      windowing milestone exactly. 226 tests passing + one manual
+      end-to-end smoke test wiring LOSO -> Dataset -> DataLoader.
       gap: harmonized signal lacks Euler angles the blueprint calls
       for here (see PROJECT_CHECKPOINT.md Stage 7). Not started yet:
       ConvLSTM/tiny-Transformer models, focal loss, lead-time metric,
