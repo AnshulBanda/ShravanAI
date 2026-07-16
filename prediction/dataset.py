@@ -68,6 +68,8 @@ class WindowRecord:
     n_real_samples: int
     n_pad_samples: int
     harmonized_path: str
+    fall_onset_frame: Optional[int]    # the SOURCE TRIAL's onset frame (same value repeated across every window of that trial, not per-window) -- None for ADL trials. Carried through so downstream code (the lead-time metric, in particular) can use the EXACT frame rather than reconstructing an approximation from window labels.
+    fall_impact_frame: Optional[int]   # same, for impact. Added specifically because prediction.lead_time.compute_lead_time_ms needs the real impact_frame, not an inferred one -- see scripts/train_prediction_model.py's use of this column.
 
 
 def build_windows_manifest(
@@ -119,6 +121,8 @@ def build_windows_manifest(
                 n_real_samples=spec.n_real_samples,
                 n_pad_samples=spec.n_pad_samples,
                 harmonized_path=row["harmonized_path"],
+                fall_onset_frame=onset_frame,
+                fall_impact_frame=impact_frame,
             ))
 
     if not records:
@@ -131,6 +135,7 @@ _EMPTY_RECORD = WindowRecord(
     dataset="", subject_id="", global_subject_id="", activity_code="", trial_id="",
     label="", label_id=0, window_index=0, start_frame=0, end_frame=0,
     n_real_samples=0, n_pad_samples=0, harmonized_path="",
+    fall_onset_frame=None, fall_impact_frame=None,
 )
 
 

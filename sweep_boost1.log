@@ -1,0 +1,63 @@
+Device: cuda
+Loading trial manifest from C:\Users\Anshul Banda\Desktop\ShravanAI\fall-project\data\harmonized\manifest.parquet...
+Building dense windows manifest (this can take a while on the full KFall set)...
+  348941 windows across 32 subjects
+  label distribution: {'non_fall': 249970, 'fall': 83059, 'pre_impact': 15912}
+Running 2 of 32 total LOSO folds.
+
+[1/2] Fold: test_subject=kfall_SA06
+    [1/2] epoch   1/20  train_loss=0.1228  val_loss=0.1039  (543.3s/epoch)
+    [1/2] epoch   2/20  train_loss=0.1028  val_loss=0.0928  (398.5s/epoch)
+    [1/2] epoch   3/20  train_loss=0.0929  val_loss=0.0897  (353.3s/epoch)
+    [1/2] epoch   4/20  train_loss=0.0860  val_loss=0.0884  (425.6s/epoch)
+    [1/2] epoch   5/20  train_loss=0.0809  val_loss=0.0866  (408.5s/epoch)
+    [1/2] epoch   6/20  train_loss=0.0769  val_loss=0.0841  (375.2s/epoch)
+    [1/2] epoch   7/20  train_loss=0.0734  val_loss=0.0848  (385.2s/epoch)
+    [1/2] epoch   8/20  train_loss=0.0700  val_loss=0.0881  (219.2s/epoch)
+    [1/2] epoch   9/20  train_loss=0.0678  val_loss=0.0867  (231.2s/epoch)
+    [1/2] epoch  10/20  train_loss=0.0660  val_loss=0.0832  (221.4s/epoch)
+    [1/2] epoch  11/20  train_loss=0.0623  val_loss=0.0948  (236.3s/epoch)
+    [1/2] epoch  12/20  train_loss=0.0602  val_loss=0.0967  (233.5s/epoch)
+    [1/2] epoch  13/20  train_loss=0.0589  val_loss=0.0906  (232.5s/epoch)
+    [1/2] epoch  14/20  train_loss=0.0575  val_loss=0.0895  (231.2s/epoch)
+    [1/2] epoch  15/20  train_loss=0.0546  val_loss=0.1057  (230.3s/epoch)
+  best_epoch=10  best_val_loss=0.0832
+              precision    recall  f1-score   support
+
+    non_fall       0.93      0.75      0.83      7594
+  pre_impact       0.12      0.52      0.20       462
+        fall       0.67      0.63      0.65      2391
+
+    accuracy                           0.72     10447
+   macro avg       0.57      0.64      0.56     10447
+weighted avg       0.83      0.72      0.76     10447
+
+  lead time: {'n_fall_trials': 67, 'n_flagged': 65, 'detection_rate': 0.9701492537313433, 'mean_lead_time_ms': 2680.3076923076924, 'median_lead_time_ms': 2720.0}
+  fold took 78.9 min  (avg 78.9 min/fold so far, ~79 min remaining for this run)
+
+[2/2] Fold: test_subject=kfall_SA07
+    [2/2] epoch   1/20  train_loss=0.1237  val_loss=0.1064  (240.3s/epoch)
+    [2/2] epoch   2/20  train_loss=0.1051  val_loss=0.0949  (235.3s/epoch)
+    [2/2] epoch   3/20  train_loss=0.0958  val_loss=0.0906  (231.0s/epoch)
+    [2/2] epoch   4/20  train_loss=0.0883  val_loss=0.0871  (230.3s/epoch)
+    [2/2] epoch   5/20  train_loss=0.0822  val_loss=0.0846  (229.5s/epoch)
+    [2/2] epoch   6/20  train_loss=0.0775  val_loss=0.0854  (219.5s/epoch)
+    [2/2] epoch   7/20  train_loss=0.0734  val_loss=0.0900  (235.3s/epoch)
+    [2/2] epoch   8/20  train_loss=0.0700  val_loss=0.0886  (217.9s/epoch)
+    [2/2] epoch   9/20  train_loss=0.0660  val_loss=0.0917  (215.4s/epoch)
+    [2/2] epoch  10/20  train_loss=0.0649  val_loss=0.0864  (231.3s/epoch)
+  best_epoch=5  best_val_loss=0.0846
+              precision    recall  f1-score   support
+
+    non_fall       0.91      0.75      0.82      8078
+  pre_impact       0.11      0.46      0.17       417
+        fall       0.56      0.57      0.56      1947
+
+    accuracy                           0.70     10442
+   macro avg       0.52      0.59      0.52     10442
+weighted avg       0.81      0.70      0.75     10442
+
+  lead time: {'n_fall_trials': 50, 'n_flagged': 49, 'detection_rate': 0.98, 'mean_lead_time_ms': 3020.204081632653, 'median_lead_time_ms': 2830.0}
+  fold took 38.2 min  (avg 58.6 min/fold so far, ~0 min remaining for this run)
+
+Report saved to C:\Users\Anshul Banda\Desktop\ShravanAI\fall-project\results\prediction_model\convlstm_loso_report.json

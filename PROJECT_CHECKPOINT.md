@@ -1482,3 +1482,257 @@ this confirms the optimizer step itself works end-to-end too).
   blueprint §6's stated open question, not answerable until both are
   actually trained.
 - The Euler-angle channel gap (Stage 7, first section) -- still open.
+
+---
+
+### Stage 7 continued — Training loop + LOSO training script, NOT yet real-data verified
+
+**Schema addition** (small, additive): `prediction.dataset.WindowRecord`
+now carries `fall_onset_frame`/`fall_impact_frame` through to the
+WINDOW level (same value repeated across every window of a trial, not
+per-window) -- previously only available at the trial level. Added
+specifically because the lead-time metric needs the EXACT impact
+frame, and without this the training script would have had to
+reconstruct an approximate one from window labels (off by up to one
+window's stride, ~100ms at the dense 0.1s stride -- non-trivial error
+for the metric the whole pipeline is judged on). Non-breaking: pure
+addition, all Stage 7 windowing/labeling tests and the earlier
+real-data verification remain valid; two new tests added confirming
+the values are carried through correctly (`test_onset_and_impact_
+frame_carried_through_to_window_level`, `..._are_none_for_adl_trial`).
+
+**`prediction/training.py`**: `split_train_val_subjects()`
+(subject-level, held out from a LOSO fold's TRAIN subjects only --
+never touches the fold's test subject; same leakage-avoidance logic
+as `prediction.loso`/`detection.split`, applied one level down) +
+`run_epoch()` (one train-or-eval pass, sample-weighted average loss,
+shared between train and val to avoid two near-duplicate loops) +
+`train_one_fold()` (ties it together: within-fold split -> Dataset/
+Sampler/DataLoader -> training loop with early stopping -> restores
+the BEST epoch's weights, not the last epoch's -- verified by an
+actual re-run test, not just asserted -- -> evaluates on the held-out
+subject). Model-architecture-agnostic -- works for both `ConvLSTM` and
+`TinyTransformer` (or anything matching their input/output contract)
+without duplicating the loop per architecture, per blueprint §6's
+ablation plan.
+
+**`scripts/train_prediction_model.py`**: the CLI script that actually
+runs this on real data. Loops over LOSO folds (all 32, or `--max-folds`
+/`--test-subject` for a quick smoke run before committing to a full
+run), computes class weights from EACH FOLD's own train split (never
+leaking the held-out subject's class balance into the loss), trains,
+evaluates (per-class classification report + confusion matrix + the
+lead-time metric per fold), saves a JSON report.
+
+**Real bugs caught by testing/smoke-testing BEFORE this was shipped**
+(worth recording, not just the end state -- matches this project's
+practice of documenting real bugs found, not only clean results):
+1. A test assumption bug (not a code bug): assumed `lr=0.0` would make
+   a model's val loss perfectly static across epochs -- missed that
+   BatchNorm running-stats BUFFERS still update every training forward
+   pass regardless of the optimizer's learning rate. Fixed by testing
+   the actual invariant that matters (restored weights reproduce the
+   recorded `best_val_loss` on replay) instead of a specific epoch
+   number.
+2. A real bug: `scripts/train_prediction_model.py` used `pd.isna()`
+   without importing `pandas` -- caught by running an actual synthetic
+   end-to-end smoke test of the script's real code path (build a fake
+   multi-subject manifest -> `build_windows_manifest` ->
+   `generate_loso_folds` -> `train_one_fold` ->
+   `_per_fold_lead_time_summary`), not just the unit tests in
+   isolation (which didn't happen to exercise that function). Fixed.
+3. A real environment bug: the project's editable pip install
+   (`pip install -e .`) had NEVER actually registered the `prediction`
+   package with Python's import system at all -- the editable-install
+   finder file only listed `shared` and `detection`, because it was
+   generated (by an earlier `pip install -e .` run) before `prediction`
+   existed on disk as a package. This was INVISIBLE under `pytest`
+   (pytest's own rootdir-insertion into `sys.path` was masking it) but
+   surfaced immediately when running `python scripts/train_prediction_
+   model.py` directly from a normal shell. Fixed here by re-running
+   `pip install -e .` in the sandbox. **You likely need to re-run `pip
+   install -e .` locally too**, if your local editable install
+   similarly predates the `prediction` package -- otherwise
+   `scripts/train_prediction_model.py` may fail with
+   `ModuleNotFoundError: No module named 'prediction'` even though
+   `pytest tests/` passes fine.
+
+**Tests**: `tests/test_prediction_training.py` (10 tests) + 2 new
+tests in `tests/test_prediction_dataset.py` for the schema addition =
+12 new. Full suite: 268 passed (256 prior + 12 new), zero regressions.
+Also ran a full synthetic end-to-end smoke test of the ACTUAL script
+code path (not just its individual pieces in isolation) -- 3 synthetic
+subjects, 1 ADL + 1 fall trial each, real onset=130/impact=208 values,
+through `build_windows_manifest` -> LOSO fold -> class-weighted focal
+loss -> `train_one_fold` (2 epochs) -> `_per_fold_lead_time_summary`.
+Output: `best_epoch=2`, finite `best_val_loss`, lead-time summary
+`{n_fall_trials: 1, n_flagged: 1, detection_rate: 1.0, mean_lead_time_
+ms: 2080.0}` -- ran without error end to end. (The 2080ms lead time
+itself is meaningless here -- untrained model, synthetic random data --
+this smoke test is about the PLUMBING working, not a real result.)
+
+**NOT yet done**:
+- The actual real training run on real KFall data -- this script is
+  now ready to run, but hasn't been, by design (that's genuinely your
+  compute/time to spend, not something to run unattended in a sandbox).
+- ConvLSTM vs. TinyTransformer ablation -- needs real training runs.
+- The Euler-angle channel gap (Stage 7, first section) -- still open.
+- Onset-frame annotation-noise sensitivity check (blueprint §9 --
+  retrain with onset labels shifted +/-1-2 frames) -- deferred until
+  after a first real training pass gives something worth stress-testing.
+
+---
+
+### Stage 7 continued — Live per-epoch progress + timing (real-user-triggered fix)
+
+Real, reported problem during the first attempted full training run:
+after switching the run to background (`> log 2>&1 &`), the log file
+sat empty for 30+ minutes with no way to tell whether training was
+progressing or hung -- turned out to be genuinely running (confirmed
+via `nvidia-smi` showing real GPU utilization), just silent, for two
+COMPOUNDING reasons:
+1. `train_one_fold()` only ever printed once an ENTIRE fold (up to 50
+   epochs) finished -- no per-epoch signal at all.
+2. Python defaults to fully block-buffered stdout when it isn't a real
+   terminal (i.e. whenever redirected to a file) -- so even the
+   per-fold print, once it existed, wouldn't have appeared until the
+   OS buffer filled or the process exited, regardless of `-u`/`nohup`
+   usage being remembered correctly on every invocation.
+
+Fixed both:
+- `prediction/training.py`'s `train_one_fold()` now accepts an
+  optional `on_epoch_end(epoch, train_loss, val_loss, epoch_seconds)`
+  callback, called after every epoch (not just improvements). Kept
+  optional (not a hardcoded `print()`) since `train_one_fold` is also
+  called directly by `tests/test_prediction_training.py`, where
+  per-epoch print spam during the test suite would be unwanted.
+- `scripts/train_prediction_model.py` now passes a real printing
+  callback (`train_loss`/`val_loss`/seconds-per-epoch), AND calls
+  `sys.stdout.reconfigure(line_buffering=True)` at the top -- forces
+  line-buffered output unconditionally, so progress appears live in
+  the log file regardless of whether the process is foregrounded,
+  backgrounded, or piped, without depending on remembering `python -u`
+  every time.
+- Also added a running per-fold timing summary + ETA estimate,
+  printed after each fold completes (`avg X min/fold so far, ~Y min
+  remaining`), since "how long will this take" had no good answer
+  before beyond guessing.
+
+Verified: `tests/test_prediction_training.py` still 10/10 passing
+(callback is optional, existing tests don't need to change). Ran a
+fresh synthetic end-to-end smoke test of `train_one_fold` WITH a real
+callback attached -- confirmed it fires after every epoch with correct
+train/val loss and timing, not just at the end. Full suite: 268
+passed, unchanged count (this was a pure enhancement, no new test
+file needed -- the callback's correctness is what the smoke test
+checked, not something requiring a new permanent pytest).
+
+**Also worth recording** (operational, not code): running the script
+via `nohup ... & disown` in Git Bash/MINGW64 on Windows was unreliable
+-- a background job silently died almost immediately with a near-empty
+log, and separately, an orphaned duplicate process was found still
+running (`kill -9`'d) after switching approaches -- Windows doesn't
+have real Unix process detachment, and MSYS's job control emulation is
+imperfect. Foregrounding the run directly in an open terminal window
+(no `&`) is what actually worked reliably.
+
+**NOT yet done** (unchanged): the actual full real training run on
+real KFall data hasn't completed yet -- restart it with this fix in
+place.
+
+---
+
+### Stage 7 continued — First real training runs (8/32 folds, boost sweep) + diagnostic tooling built, key finding NOT yet explained
+
+**Real training actually ran** (on Anshul's RTX 3050 Ti laptop GPU,
+`cu130` torch build). Two things worth recording as real findings, not
+just log entries:
+
+**1. Real 8-fold run (convlstm, max_epochs=20, boost=2.0, default):**
+all 8 folds converged cleanly via early stopping (8-16 epochs, val_loss
+stable ~0.055-0.062) -- consistent, reproducible pattern across 8
+different held-out subjects, not noise from one lucky/unlucky fold.
+Consistent problem across every fold: `pre_impact` precision stuck at
+0.08-0.16 even with proper convergence -- e.g. SA08's confusion matrix
+showed 958 true `fall` windows misclassified as `pre_impact`, almost
+as many as the 1,638 correctly called `fall` -- so the model isn't
+just flagging ordinary walking as `pre_impact`, it's also genuinely
+confusing `pre_impact` and `fall` with each other (adjacent phases of
+one brief event, harder to separate by timing than "something's
+happening" vs. "normal activity"). Lead time ~2.7-3.4s across every
+fold -- essentially unchanged from the very first undertrained run.
+
+**2. Boost sweep (2.0 -> 1.0 -> 0.5), same 2 folds (SA06, SA07), same
+max_epochs=20 -- REAL FINDING: lowering the loss weight on `pre_impact`
+does NOT fix lead time.** On SA06 specifically:
+
+| Boost | non_fall P/R | pre_impact P/R | fall P/R | Accuracy | Mean lead time |
+|---|---|---|---|---|---|
+| 2.0 | 0.95/0.60 | 0.08/0.73 | 0.72/0.48 | 0.58 | 2774ms |
+| 1.0 | 0.93/0.75 | 0.12/0.52 | 0.67/0.63 | 0.72 | 2680ms |
+| 0.5 | 0.92/0.83 | 0.13/0.30 | 0.66/0.73 | 0.78 | 2310ms |
+
+Lowering boost cleanly trades `pre_impact` recall away for
+better everything-else precision (classic class-weight tradeoff,
+working as expected) -- but lead time barely moves (2774->2310ms)
+across a 4x change in the weighting. Real KFall onset->impact gap is
+only ~600-1000ms (e.g. SA06 T22: onset=130, impact=208 frames = 780ms).
+**Conclusion: the loss weighting is not the main lever behind the
+too-early/too-diffuse `pre_impact` firing. Something more structural
+is likely going on** -- worth investigating directly rather than
+continuing to sweep hyperparameters blindly.
+
+**Diagnostic tooling built in response** (not yet run on real data --
+this is where the NEXT session should start):
+- `scripts/train_prediction_model.py` now saves a model checkpoint per
+  fold (`results/prediction_model/checkpoints/{model}_boost{boost}_
+  {test_subject}.pt`) -- previously NOTHING was persisted to disk, so a
+  trained model couldn't be inspected after the run finished without
+  retraining from scratch. Also: **output report filenames now encode
+  the run config** (`{model}_boost{X}_ep{Y}_{fold_tag}_loso_report.json`)
+  -- fixes a real near-miss where a fixed filename per model almost
+  caused the boost=0.5 sweep run to silently overwrite the boost=1.0
+  results on disk before they'd been reviewed.
+- `scripts/inspect_trial_predictions.py` (NEW) -- loads a saved
+  checkpoint, takes ONE specific real trial (subject + activity_code +
+  trial_id), and prints every window's TRUE label vs. the model's
+  PREDICTED label + full 3-class softmax confidence, in time order,
+  with the real onset/impact frames marked inline. Verified structurally
+  (synthetic trial + untrained model -- confirmed the table renders
+  correctly, onset/impact markers land on the right rows, columns
+  align) but **NOT yet run against a real trained checkpoint on real
+  data** -- that's the natural next action.
+
+**NOT yet done / immediate next steps for a fresh session**:
+1. Run `scripts/inspect_trial_predictions.py` against one of the real
+   checkpoints already saved from the 8-fold run (e.g.
+   `results/prediction_model/checkpoints/convlstm_boost2.0_kfall_SA06.pt`
+   against subject=kfall_SA06, activity_code=T22, trial_id=R01 -- the
+   same real trial verified throughout this project) -- to SEE whether
+   `pre_impact` firing is scattered randomly across the whole trial, or
+   clustered somewhere specific but mistimed. This is the concrete
+   diagnostic step that should explain the boost-sweep finding above.
+2. Depending on what that shows: possible directions include
+   rethinking the window length/stride (100 samples might be too long
+   relative to the ~60-100 frame onset->impact gap to localize timing
+   precisely), inspecting whether the auxiliary tilt/jerk channels
+   actually carry the signal they're meant to on real fall trials (not
+   yet spot-checked on real data -- see Stage 7's feature-engineering
+   section), or that the 3-class boundary itself needs revisiting (the
+   blueprint's own fallback option, flagged back in `prediction/
+   labelers.py`'s docstring).
+3. Full 32-fold run (any boost value) still hasn't happened -- only
+   8/32 and a 2-fold sweep so far.
+4. TinyTransformer branch: zero real training runs yet, only
+   ConvLSTM.
+5. The Euler-angle channel gap (Stage 7, first section) -- still open.
+
+**Operational note for whoever picks this up**: training on this
+project's GPU (RTX 3050 Ti, 4GB) runs at roughly 4-9 min/epoch
+depending on thermal state -- a full 32-fold run at up to 20-50 epochs
+each is realistically many hours, not minutes. Running in the
+foreground in an open terminal (not `nohup`/backgrounded) proved most
+reliable on this Windows/MINGW64 setup after real reliability issues
+with background job detachment. `scripts/train_prediction_model.py`
+now prints live per-epoch progress and a running ETA, specifically so
+this is never ambiguous again.

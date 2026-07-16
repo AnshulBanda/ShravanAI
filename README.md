@@ -38,31 +38,24 @@ not inside it) for the full design rationale.
       (see PROJECT_CHECKPOINT.md).
 - [ ] Stage 5+ (remaining) — FallAllD -- see blueprint
 - [ ] Stage 7 — Prediction pipeline (IN PROGRESS): windowing +
-      onset/impact labeling REAL-DATA VERIFIED (348,941 real KFall
-      windows: non_fall 71.6%, fall 23.8%, pre_impact 4.6%; frame-exact
-      spot check on SA06 T22 R01). Feature engineering
-      (`prediction/features.py`, rolling accel-magnitude/jerk/tilt-
-      deviation auxiliary channels per blueprint §5) and LOSO + PyTorch
-      data-loading layer (`prediction/loso.py`, `prediction/
-      torch_dataset.py`) built and REAL-DATA VERIFIED (32 LOSO folds
-      against real KFall, matches subject count; fold windows sum
-      exactly to the earlier real windowing total). Model
-      architectures (`prediction/models/convlstm.py`,
-      `prediction/models/tiny_transformer.py`), focal loss
-      (`prediction/losses.py`), and the lead-time metric
-      (`prediction/lead_time.py`) built, NOT yet real-data verified.
-      256 tests passing + manual smoke tests (LOSO->Dataset->
-      DataLoader wiring; real forward+backward+optimizer-step cycle
-      for both model branches using real Stage-7 class-count-derived
-      loss weights). Known gap: harmonized signal lacks Euler angles
-      the blueprint calls for here (see PROJECT_CHECKPOINT.md Stage
-      7). Not started yet: the actual training script tying
-      everything together, and the ConvLSTM-vs-TinyTransformer
-      ablation.
-      gap: harmonized signal lacks Euler angles the blueprint calls
-      for here (see PROJECT_CHECKPOINT.md Stage 7). Not started yet:
-      ConvLSTM/tiny-Transformer models, focal loss, lead-time metric,
-      training script.
+      onset/impact labeling, LOSO folds, and features all REAL-DATA
+      VERIFIED (see PROJECT_CHECKPOINT.md). Models, focal loss,
+      lead-time metric, training loop, and LOSO training CLI script
+      all built and RUN FOR REAL (8/32 folds, ConvLSTM, on Anshul's
+      RTX 3050 Ti). 268 tests passing.
+      **KEY OPEN FINDING**: real training converges cleanly and
+      reproducibly across folds, but `pre_impact` precision stays
+      stuck at 0.08-0.16 and mean lead time stays ~2.3-3.4s (real
+      onset->impact gap is only ~0.6-1.0s) REGARDLESS of loss-weight
+      sweep (boost 2.0/1.0/0.5 all show the same problem) -- so the
+      loss weighting is NOT the main lever. A per-window diagnostic
+      script (`scripts/inspect_trial_predictions.py`) was built to
+      investigate this directly but has NOT YET been run against a
+      real trained checkpoint -- that's the concrete next step. See
+      PROJECT_CHECKPOINT.md's latest Stage 7 section for the full
+      writeup, real numbers, and next-step reasoning. NOT started yet:
+      full 32-fold run, TinyTransformer branch (zero real runs so
+      far), Euler-angle channel gap.
 
 ## Setup
 

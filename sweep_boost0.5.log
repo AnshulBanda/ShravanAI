@@ -1,0 +1,40 @@
+Device: cuda
+Loading trial manifest from C:\Users\Anshul Banda\Desktop\ShravanAI\fall-project\data\harmonized\manifest.parquet...
+Building dense windows manifest (this can take a while on the full KFall set)...
+  348941 windows across 32 subjects
+  label distribution: {'non_fall': 249970, 'fall': 83059, 'pre_impact': 15912}
+Running 2 of 32 total LOSO folds.
+
+[1/2] Fold: test_subject=kfall_SA06
+    [1/2] epoch   1/20  train_loss=0.1604  val_loss=0.1324  (274.5s/epoch)
+    [1/2] epoch   2/20  train_loss=0.1342  val_loss=0.1232  (229.1s/epoch)
+    [1/2] epoch   3/20  train_loss=0.1211  val_loss=0.1130  (236.1s/epoch)
+    [1/2] epoch   4/20  train_loss=0.1121  val_loss=0.1084  (234.6s/epoch)
+    [1/2] epoch   5/20  train_loss=0.1050  val_loss=0.1076  (225.5s/epoch)
+    [1/2] epoch   6/20  train_loss=0.0997  val_loss=0.1078  (226.3s/epoch)
+    [1/2] epoch   7/20  train_loss=0.0937  val_loss=0.1091  (231.1s/epoch)
+    [1/2] epoch   8/20  train_loss=0.0897  val_loss=0.1061  (226.8s/epoch)
+    [1/2] epoch   9/20  train_loss=0.0852  val_loss=0.1131  (226.5s/epoch)
+    [1/2] epoch  10/20  train_loss=0.0808  val_loss=0.1114  (230.9s/epoch)
+    [1/2] epoch  11/20  train_loss=0.0770  val_loss=0.1217  (232.1s/epoch)
+    [1/2] epoch  12/20  train_loss=0.0745  val_loss=0.1231  (241.9s/epoch)
+    [1/2] epoch  13/20  train_loss=0.0713  val_loss=0.1235  (242.8s/epoch)
+  best_epoch=8  best_val_loss=0.1061
+              precision    recall  f1-score   support
+
+    non_fall       0.92      0.83      0.87      7594
+  pre_impact       0.13      0.30      0.18       462
+        fall       0.66      0.73      0.69      2391
+
+    accuracy                           0.78     10447
+   macro avg       0.57      0.62      0.58     10447
+weighted avg       0.83      0.78      0.80     10447
+
+  lead time: {'n_fall_trials': 67, 'n_flagged': 62, 'detection_rate': 0.9253731343283582, 'mean_lead_time_ms': 2310.0, 'median_lead_time_ms': 2375.0}
+  fold took 51.3 min  (avg 51.3 min/fold so far, ~51 min remaining for this run)
+
+[2/2] Fold: test_subject=kfall_SA07
+    [2/2] epoch   1/20  train_loss=0.1613  val_loss=0.1430  (415.5s/epoch)
+    [2/2] epoch   2/20  train_loss=0.1356  val_loss=0.1255  (378.4s/epoch)
+    [2/2] epoch   3/20  train_loss=0.1226  val_loss=0.1184  (398.0s/epoch)
+    [2/2] epoch   4/20  train_loss=0.1135  val_loss=0.1150  (391.1s/epoch)

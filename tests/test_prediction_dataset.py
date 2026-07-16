@@ -118,6 +118,31 @@ def test_empty_input_has_correct_columns_not_just_empty():
     assert "label_id" in windows_df.columns
 
 
+def test_onset_and_impact_frame_carried_through_to_window_level():
+    # Every window of a fall trial should carry the SAME onset/impact
+    # frame (the source trial's, not per-window) -- needed downstream
+    # by prediction.lead_time, which needs the exact impact frame, not
+    # an approximation reconstructed from window labels.
+    trial_df = pd.DataFrame([_trial_row(
+        activity_code="T22", label="fall", duration_s=4.0,
+        fall_onset_frame=130, fall_impact_frame=208,
+    )])
+
+    windows_df = build_windows_manifest(trial_df, config=_dense_config())
+
+    assert (windows_df["fall_onset_frame"] == 130).all()
+    assert (windows_df["fall_impact_frame"] == 208).all()
+
+
+def test_onset_and_impact_frame_are_none_for_adl_trial():
+    trial_df = pd.DataFrame([_trial_row(label="adl", duration_s=2.0)])
+
+    windows_df = build_windows_manifest(trial_df, config=_dense_config())
+
+    assert windows_df["fall_onset_frame"].isna().all()
+    assert windows_df["fall_impact_frame"].isna().all()
+
+
 # --- load_window (same edge-padding contract as detection's) ---
 
 def _write_ramp_parquet(path, n_rows: int):
