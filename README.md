@@ -81,9 +81,34 @@ not inside it) for the full design rationale.
       scans a held-out subject's real trials to find ones that are
       actually safe to demo (no early false alarm, does catch the real
       fall) rather than picking trials by hand — first hand-picked
-      trial (`kfall_SA06/T22/R01`) turned out to false-alarm at t=0.00s
-      when run through the demo path, which is what prompted building
-      the curation script instead of continuing to guess.
+- [ ] **Digital-twin file bridge (NEW, in progress)** —
+      `scripts/run_digital_twin_bridge.py` is a long-running background
+      process (runs until you Ctrl+C it, does not exit on its own) that
+      watches a folder for JSON IMU-sample files, buffers them into a
+      rolling window, runs them through the same checkpoint +
+      `PredictionSmoother` the live demo uses, and continuously
+      rewrites a single output JSON file with the current predicted
+      state. Built for the digital twin (Unity dashboard) to consume,
+      since its integration pattern is file-based JSON on disk.
+      Input contract: `{"acc_x":..,"acc_y":..,"acc_z":..,"gyro_x":..,"gyro_y":..,"gyro_z":..}`
+      per sample (or a batch list), at 100Hz, already harmonized the
+      same way training data is. Output contract:
+      `{"timestamp":..,"window_ready":bool,"state":"calm"|"pre_impact"|"fall"|"buffering","probabilities":{...}}`.
+      Logic dry-run-verified (buffering/batching/malformed-input
+      handling, correct windowed-array shape) without a real checkpoint
+      — NOT yet smoke-tested against the actual digital twin's real
+      output, and the exact schema above is this session's best design
+      given "file-based JSON," not yet confirmed against what the
+      Unity side actually produces. See PROJECT_CHECKPOINT.md's latest
+      section for the full contract, reliability caveats, and the
+      concrete "not yet done" list before this is a real integration.
+      **Reliability reminder for anyone integrating downstream**: this
+      bridge relays whatever the model actually predicts — it does not
+      fix the `pre_impact` false-positive/late-detection issues
+      documented above. Feeding it arbitrary live data (vs. the two
+      specifically-verified curated trials,
+      `kfall_SA06/T22/R05` and `kfall_SA06/T24/R01`) will surface those
+      same issues live.
 
 ## Setup
 

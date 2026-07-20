@@ -1942,3 +1942,84 @@ instead made the existing checkpoint's output demo-safe:
    demo, with prediction shown via curated pre-recorded trials + the
    smoothing layer, framed honestly as active research rather than a
    finished feature.
+
+---
+
+### Stage 7 continued — Digital-twin file-bridge built for handoff
+
+**Context**: the 2-day live-demo deadline expanded to include handing
+the prediction pipeline to a separate digital-twin system (Unity-based
+caregiver dashboard, per this project's long-term architecture) so it
+can display live predictions itself rather than the terminal-based
+`run_live_demo.py`. The digital twin's existing integration pattern is
+**file-based JSON on disk** (confirmed directly, not assumed).
+
+**`scripts/run_digital_twin_bridge.py` (NEW)** — a long-running
+background process (loops until killed with Ctrl+C, does NOT run once
+and exit — this tripped up the first read of it, worth stating plainly
+for whoever picks this up next). Watches an `--incoming-dir` for JSON
+sample files, maintains a rolling window via the same
+`prediction/features.py:augment_window` the training pipeline uses,
+runs the checkpoint + the SAME `PredictionSmoother` the live demo uses,
+and continuously rewrites a single `--outgoing-file` with the current
+state. Dry-run-verified (buffering, batch-vs-single-sample file
+handling, malformed-sample skipping, and the augmented window shape
+landing at the model's expected `(window_length_samples, 9)`) without
+needing a real checkpoint — pure logic test, not yet run against the
+real digital twin's actual output.
+
+**Input contract** (digital twin writes, one file per sample or a
+batch list, consumed+deleted after processing):
+```json
+{"acc_x": 0.05, "acc_y": -1.01, "acc_z": 0.14, "gyro_x": 1.2, "gyro_y": -0.3, "gyro_z": 0.8}
+```
+Samples MUST already be at the checkpoint's training rate (100Hz) and
+in the same physical units/harmonization as training data (no
+resampling or rescaling happens in the bridge) -- this is an assumption
+the digital twin side must satisfy, not something verified from this
+side.
+
+**Output contract** (bridge rewrites continuously):
+```json
+{"timestamp": ..., "window_ready": true, "state": "calm", "probabilities": {"non_fall": 0.7, "pre_impact": 0.2, "fall": 0.1}}
+```
+`state` is one of `"buffering"` (not enough samples yet), `"calm"`,
+`"pre_impact"`, `"fall"`.
+
+**NOT yet done / what the digital-twin side still needs before this is
+a real integration, not just plumbing**:
+1. **Schema confirmation** — the contract above is this session's best
+   design given "file-based JSON," not something verified against the
+   digital twin's actual Unity-side output format. Whoever owns that
+   side needs to either match this schema or tell us theirs so the
+   bridge's `CHANNEL_KEYS` list / output dict can be adjusted.
+2. **One real end-to-end smoke test** — start the bridge, manually drop
+   a few real sample files into `--incoming-dir`, confirm
+   `--outgoing-file` updates as expected. Not yet done.
+3. **A decision on live vs. curated data**, made explicit rather than
+   implicit: if the digital twin feeds arbitrary/live sensor data
+   through this bridge, it will surface the SAME false-positive/
+   late-detection behavior documented in the Stage 7 diagnostic
+   sections above (only ~3% of real held-out trials -- 2/67 for
+   kfall_SA06 -- pass a strict double-sided onset+impact timing check;
+   ~29% false-positive rate on plain ADL activity). If the demo plan is
+   to replay the two specifically-verified trials
+   (`kfall_SA06/T22/R05`, `kfall_SA06/T24/R01`) through the bridge
+   rather than genuinely live data, that avoids surfacing those known
+   issues live -- but that choice needs to be made deliberately, not
+   discovered on stage.
+
+**Reliability summary for anyone consuming this checkpoint
+downstream** (repeating the key numbers here since this is the section
+most likely to be read by someone integrating rather than researching):
+checkpoint = `convlstm_boost2.0_win1.0_kfall_SA06.pt`. Detection
+pipeline (separate, binary fall/no-fall classifier) is the reliable
+component: 0.836 accuracy, 0.921 ROC-AUC on real held-out subjects.
+Prediction pipeline (`pre_impact`/lead-time) is NOT yet reliable on
+arbitrary data -- treat as demo/prototype-stage, not validated for
+real deployment decisions. Full root-cause narrative in the Stage 7
+sections above; short version: model can't yet reliably distinguish
+genuine pre-fall motion from a staged task's simply-more-energetic
+lead-in, two structural fixes (window length, normalization) were
+tested and ruled out this session, real fix (richer temporal context
+per window, and/or more real fall data) is deferred post-demo.

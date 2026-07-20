@@ -71,7 +71,7 @@ def main() -> None:
     model.to(device).eval()
 
     print(f"Scanning {len(trial_keys)} fall trials for {args.subject}...\n")
-    print(f"{'trial':<12} {'onset_s':>8} {'impact_s':>9} {'first_escalate_s':>18} {'lead_s':>8} {'reached_fall':>13} {'safe_for_demo':>14}")
+    print(f"{'trial':<12} {'onset_s':>8} {'impact_s':>9} {'first_escalate_s':>18} {'lead_s':>8} {'fall_lag_s':>10} {'reached_fall':>13} {'safe_for_demo':>14}")
     print("-" * 90)
 
     results = []
@@ -90,6 +90,7 @@ def main() -> None:
 
         smoother = PredictionSmoother(SmootherConfig())
         first_escalate_s = None
+        first_fall_s = None
         reached_fall = False
 
         for _, row in trial_windows.iterrows():
@@ -104,33 +105,40 @@ def main() -> None:
                 first_escalate_s = t_s
             if state == AlertState.FALL:
                 reached_fall = True
+                if first_fall_s is None:
+                    first_fall_s = t_s
 
         lead_s = (onset_s - first_escalate_s) if first_escalate_s is not None else None
-        # "safe for demo" heuristic: doesn't escalate more than 0.3s before
-        # real onset (a SMALL early margin is fine/expected -- that's the
-        # whole point of pre_impact -- but escalating seconds early, or at
-        # t=0, looks like a false alarm) AND does eventually reach FALL by
-        # the time impact happens (otherwise it's a silent miss, also bad
-        # for a demo -- worse, arguably, since nothing visibly happens).
+        fall_lag_s = (first_fall_s - impact_s) if first_fall_s is not None else None
+        # "safe for demo" heuristic, v2: doesn't escalate more than 0.3s
+        # before real onset, DOES reach FALL, AND reaches FALL within 1.0s
+        # of real impact -- v1 only checked the first two and let
+        # T29/R04 through, which sat in PRE_IMPACT for 4.2s after the
+        # real impact before finally escalating to FALL. A demo where
+        # the alert lags visible impact by multiple seconds is arguably
+        # worse than one that's slightly early.
         safe = (
             first_escalate_s is not None
             and (onset_s - first_escalate_s) <= 0.3
             and reached_fall
+            and fall_lag_s is not None
+            and fall_lag_s <= 1.0
         )
-        results.append((activity_code, trial_id, onset_s, impact_s, first_escalate_s, lead_s, reached_fall, safe))
+        results.append((activity_code, trial_id, onset_s, impact_s, first_escalate_s, lead_s, first_fall_s, fall_lag_s, reached_fall, safe))
 
         trial_label = f"{activity_code}/{trial_id}"
         escalate_str = f"{first_escalate_s:.2f}" if first_escalate_s is not None else "never"
         lead_str = f"{lead_s:+.2f}" if lead_s is not None else "n/a"
-        print(f"{trial_label:<12} {onset_s:>8.2f} {impact_s:>9.2f} {escalate_str:>18} {lead_str:>8} {str(reached_fall):>13} {('YES' if safe else 'no'):>14}")
+        fall_lag_str = f"{fall_lag_s:+.2f}" if fall_lag_s is not None else "n/a"
+        print(f"{trial_label:<12} {onset_s:>8.2f} {impact_s:>9.2f} {escalate_str:>18} {lead_str:>8} {fall_lag_str:>10} {str(reached_fall):>13} {('YES' if safe else 'no'):>14}")
 
     safe_trials = [r for r in results if r[-1]]
     print(f"\n{len(safe_trials)} / {len(results)} trials look demo-safe by this heuristic.")
     if safe_trials:
-        print("Recommended (sorted by cleanest lead time, closest to onset without going early):")
-        safe_trials.sort(key=lambda r: abs(r[5]) if r[5] is not None else float("inf"))
+        print("Recommended (sorted by cleanest overall timing -- onset lead + fall lag combined):")
+        safe_trials.sort(key=lambda r: abs(r[5] or 0) + abs(r[7] or 0))
         for r in safe_trials[:5]:
-            print(f"  {r[0]}/{r[1]}  (escalates {r[5]:+.2f}s relative to real onset)")
+            print(f"  {r[0]}/{r[1]}  (escalates {r[5]:+.2f}s rel. to onset, reaches FALL {r[7]:+.2f}s rel. to impact)")
 
 
 if __name__ == "__main__":
