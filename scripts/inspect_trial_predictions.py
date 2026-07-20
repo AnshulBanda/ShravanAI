@@ -46,12 +46,16 @@ def main() -> None:
     parser.add_argument("--subject", required=True, help="global_subject_id, e.g. kfall_SA06")
     parser.add_argument("--activity-code", required=True, help="e.g. T22")
     parser.add_argument("--trial-id", required=True, help="e.g. R01")
+    parser.add_argument("--window-length-s", type=float, default=1.0,
+                         help="MUST match the window_length_s the checkpoint was trained with (see the checkpoint filename's win{X} segment).")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    windowing_config = PredictionWindowingConfig(window_length_s=args.window_length_s)
+    window_length_samples = round(args.window_length_s * windowing_config.target_rate_hz)
 
     trial_df = load_manifest(args.manifest)
-    windows_df = build_windows_manifest(trial_df, config=PredictionWindowingConfig())
+    windows_df = build_windows_manifest(trial_df, config=windowing_config)
 
     trial_windows = windows_df[
         (windows_df["global_subject_id"] == args.subject)
@@ -82,7 +86,7 @@ def main() -> None:
     signal_cache: dict = {}
     windows = []
     for _, row in trial_windows.iterrows():
-        windows.append(load_augmented_window(row, window_length_samples=100, signal_cache=signal_cache))
+        windows.append(load_augmented_window(row, window_length_samples=window_length_samples, signal_cache=signal_cache))
     batch = torch.from_numpy(
         np.stack(windows).transpose(0, 2, 1)  # (n_windows, n_samples, 9) -> (n_windows, 9, n_samples)
     ).float().to(device)

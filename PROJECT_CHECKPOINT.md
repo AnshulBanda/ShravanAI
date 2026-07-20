@@ -1736,3 +1736,209 @@ reliable on this Windows/MINGW64 setup after real reliability issues
 with background job detachment. `scripts/train_prediction_model.py`
 now prints live per-epoch progress and a running ETA, specifically so
 this is never ambiguous again.
+
+---
+
+### Stage 7 continued — Real checkpoint diagnosed end-to-end, window-length hypothesis RULED OUT, normalization-leakage RULED OUT, live-demo smoothing layer built (2-day demo deadline)
+
+**Context**: picked up exactly where the previous session left off --
+running `scripts/inspect_trial_predictions.py` against a real trained
+checkpoint. Found the checkpoint didn't actually exist yet (checkpoint-
+saving code had been added AFTER the 8-fold run that produced the
+existing report; `results/prediction_model/convlstm_loso_report.json`
+turned out to be the boost=1.0 run's report, silently surviving under
+a generic pre-fix filename while the boost=2.0/0.5 raw fold data were
+lost -- exactly the overwrite risk flagged, and now actually observed,
+not just anticipated). Retrained one real fold (`kfall_SA06`,
+boost=2.0, max_epochs=20) to get an actual checkpoint:
+`convlstm_boost2.0_win1.0_kfall_SA06.pt`, 78.6 min. Confusion matrix
+matched the same shape as before (pre_impact precision ~0.09).
+
+**Per-trial diagnostic findings (`inspect_trial_predictions.py`) --
+three trials, three DIFFERENT failure shapes, not one clean mechanism:**
+- `kfall_SA06/T22/R01` (onset=130, impact=208): `pre_impact` already
+  at 0.59-0.61 confidence from frame 0 -- ~130 frames (1.3s) before
+  onset, well before any real precursor motion.
+- `kfall_SA06/T30/R01` (onset=337, impact=394): same elevated-from-
+  frame-0 pattern, DESPITE onset being 3.37s in rather than 1.3s --
+  ruled out "graded rise toward onset," since a real precursor signal
+  would climb as onset approaches, not sit flat regardless of distance.
+- `kfall_SA18/T22/R01` (onset=131, impact=227, subject IN the training
+  set, not held out): OPPOSITE failure -- predicted `non_fall` straight
+  through onset AND impact, only escalating ~80 frames (0.8s) late.
+
+**Multi-subject "settling period" check (`scripts/check_settling.py`,
+NEW) -- inconclusive, does NOT support a universal artifact:** raw
+accel-magnitude std ratio (fall-trial-start vs. ADL-trial-start, first
+100 frames) across 8 subjects ranged 0.5x-24.4x with no consistent
+pattern -- half the subjects near 1x. Real physical cause identified
+via raw CSV inspection though: `T30R01`'s first-second accel-mag std
+was 0.1386 vs. `T01R01`'s 0.0055 (25x) for SA06 specifically --
+different KFall fall TASKS (T22 vs. T30, different simulated fall
+scenarios) have genuinely different natural lead-in kinematics, this
+just isn't universal across subjects/tasks.
+
+**Aggregate error-vs-distance-to-onset analysis
+(`scripts/analyze_temporal_errors.py`, NEW) -- the most informative
+single result this session.** Reconstructs the real SA06 LOSO fold,
+runs inference over EVERY held-out test window (not one hand-picked
+trial), bins fall-trial windows by signed distance to real onset:
+
+| bin (frames from onset) | n | accuracy | false_pre_impact_rate |
+|---|---|---|---|
+| (-400,-300] | 114 | 0.386 | 0.614 |
+| (-300,-200] | 292 | 0.130 | 0.866 |
+| (-200,-100] | 491 | 0.039 | 0.906 |
+| (-100,-50] | 317 | 0.767 | 0.016 |
+| (-50,-20] | 200 | 0.495 | 0.250 |
+| (-20,0] | 134 | 0.425 | 0.485 |
+| (0,20] | 133 | 0.444 | 0.534 |
+| (100,200] | 593 | 0.683 | 0.288 |
+| (300,400] | 219 | 0.525 | 0.347 |
+
+ADL windows (n=6679, no onset ever): accuracy 0.631, **false_pre_impact
+rate 0.290** -- IMPORTANT CORRECTION: this contradicts the earlier
+single-trial spot-check (`kfall_SA06/T01/R01` alone showed ~0%
+false-positive) -- that one trial was not representative; the real
+aggregate ADL false-positive rate is substantial. Don't trust a single
+trial's diagnostic output as characterizing the whole distribution
+again -- always cross-check against the aggregate.
+
+The (-100,-50] false-positive dip (0.016) initially looked like
+unexplained real structure -- **it isn't**. It's a labeling-mechanics
+artifact: a 100-sample window starting 75 frames before onset actually
+ENDS 25 frames after onset, so it's already correctly labeled
+`pre_impact`, not `non_fall` -- structurally excluded from counting as
+a false positive regardless of what the model predicts. Confirmed by
+re-running the same analysis at window_length_s=0.5 (below): the dip
+shifted to (-50,-20]/(-20,0], exactly matching where a 50-sample
+window's end-past-onset boundary falls instead.
+
+**Real finding once that artifact is discounted: false-positive rate is
+high (60-90%) 100-400 frames before onset -- ordinary activity, nothing
+fall-related happening yet -- and this is WORSE than the ADL baseline
+(29%).** Something about being embedded in a fall-trial recording, even
+far from the actual event, makes the model more trigger-happy than
+genuine ADL data. Shape is non-monotonic/noisy overall, not a clean
+"gets worse near onset" curve a boundary-calibration fix would target.
+
+**Window-length experiment -- NEGATIVE RESULT, hypothesis ruled out.**
+Retrained the identical SA06/boost=2.0 fold at `window_length_s=0.5`
+(50 samples instead of 100) on the theory that a 1.0s window being
+close to/larger than the real ~0.6-1.0s onset->impact gap was forcing
+`pre_impact` into an unlearnably thin label band. Result:
+`pre_impact` precision unchanged (0.09, identical to the 1.0s run),
+detection_rate 1.0, mean_lead_time_ms 2631 (no real improvement).
+Re-ran `analyze_temporal_errors.py` on the new checkpoint -- same
+qualitative failure shape (high FP rate far before onset, similar ADL
+baseline ~0.197). **Conclusion: window length is not the primary
+cause.** This was a legitimate, cheap (~50 min) experiment worth
+running, but shouldn't be revisited without new evidence.
+
+**Normalization/leakage hypothesis -- RULED OUT by direct code
+inspection**, not just testing. Checked `prediction/features.py` in
+full: no `StandardScaler`, no z-scoring, no per-trial normalization
+anywhere in the prediction pipeline. The 9 input channels are raw
+`acc_x/y/z`/`gyro_x/y/z` (already axis-aligned by harmonization) plus
+3 physically-derived rolling channels (`accel_mag`, `jerk`,
+`tilt_deviation_deg`) -- no scaler-fitting step exists that could leak
+per-trial statistics into every window. Ruled out with certainty, not
+just "didn't find evidence for it."
+
+**Current honest state of the `pre_impact` problem**: two structural
+hypotheses tested and ruled out (window length, normalization leakage).
+Leading remaining theory, UNTESTED: the model has no broader trial
+context (no elapsed-time-since-start feature, no longer look-back) and
+so cannot distinguish "elevated motion because a fall is imminent" from
+"elevated motion because this particular staged task's lead-in happens
+to be more energetic." Real fix likely requires either richer temporal
+context per window, or accepting this is a data-scarcity ceiling
+(`pre_impact` is only ~4.3% of all windows -- 15,926/373,746 at
+window_length_s=0.5) that needs more/better real fall data, not
+architecture tweaking. NEITHER has been attempted yet -- deliberately
+paused (see below).
+
+**Code changes made investigating the above (bugfixes, not just
+diagnostics):**
+- `window_length_samples` was a DISCONNECTED hardcoded default (`100`)
+  in three places (`PredictionWindowDataset.__init__`,
+  `train_one_fold`'s three DataLoader constructions) with no link back
+  to whatever `PredictionWindowingConfig` actually built the manifest
+  with -- meant changing `window_length_s` alone would have silently
+  edge-padded windows back up to the wrong length instead of erroring.
+  Fixed: `TrainingConfig` now has a real `window_length_samples` field,
+  threaded through properly; `train_prediction_model.py` gained a
+  `--window-length-s` CLI flag that drives BOTH the manifest build and
+  `TrainingConfig` consistently. Checkpoint/report filenames now also
+  encode `win{X}` (`{model}_boost{X}_win{Y}_{fold_tag}...`) -- same
+  overwrite-prevention fix as the earlier boost-value filename fix,
+  extended to cover this new axis too.
+  `inspect_trial_predictions.py` and `analyze_temporal_errors.py` both
+  gained matching `--window-length-s` flags.
+- **Test suite bug found and fixed**: `pytest tests/ -q` on the real
+  GPU machine failed 1/268
+  (`test_train_one_fold_restores_best_epoch_weights_not_last_epoch`) --
+  `TrainingConfig`'s `device` field defaults to `"cuda"` whenever
+  available, so the model trains on GPU, but the test's manual
+  post-training validation replay hardcoded `device="cpu"` without
+  moving the model back first -- CPU input against CUDA weights, hard
+  crash. Never surfaced before because this test was evidently last
+  run clean on a CPU-only environment. Fixed: replay now uses
+  `config.device` instead of a hardcoded `"cpu"`, correct regardless of
+  which device actually trained the model. 268/268 passing after the
+  fix.
+
+**Live-demo smoothing layer built (deadline-driven: 2-day live-demo
+requirement surfaced mid-session)**. Given the `pre_impact` issue above
+won't be resolved in 2 days, decided NOT to keep chasing a fix and
+instead made the existing checkpoint's output demo-safe:
+- `prediction/live_smoothing.py` (NEW) -- `PredictionSmoother`: EMA
+  smoothing of raw per-window class probabilities + hysteresis
+  (different enter/exit thresholds per class, Schmitt-trigger style) +
+  a `FALL` alert latch (~2s minimum hold once triggered, so a real
+  fall alert can't flicker off a moment after firing). Sanity-checked
+  against the real raw probability sequence from `kfall_SA18/T22/R01`
+  (the trial that flip-flopped constantly in the per-window trace) --
+  collapsed 60 raw noisy windows into exactly 3 clean state
+  transitions, with the smoothed FALL trigger landing at the same
+  point the raw signal itself first crossed into fall territory (no
+  added latency, just removed flicker).
+- `scripts/run_live_demo.py` (NEW) -- replays one real trial's windows
+  through the model + smoother at real-time (or `--speed`/`--fast`)
+  pace with colored terminal output, `--show-ground-truth` for
+  narration during a live presentation.
+- **First real run exposed a demo-safety issue immediately**:
+  `kfall_SA06/T22/R01` -- the exact trial used throughout every earlier
+  diagnostic this session -- fires a smoothed `PRE-IMPACT WARNING` at
+  t=0.00s, before any real movement (real onset is t=1.30s). This is
+  the SAME false-positive-from-frame-0 issue diagnosed earlier in the
+  session, now visibly reproduced through the demo path -- confirms the
+  smoother is behaving correctly (not hiding real model behavior), but
+  also confirms this specific trial is a bad demo choice.
+- `scripts/curate_demo_trials.py` (NEW, just built, NOT YET RUN against
+  real data) -- batch-scans every fall trial for a given (held-out)
+  subject through model+smoother, reports first-escalation time
+  relative to real onset and whether FALL is ever reached, flags which
+  trials are "demo-safe" (doesn't escalate >0.3s before real onset AND
+  does reach FALL by impact). Deliberately restricted to the
+  checkpoint's actual held-out LOSO subject (not training-set subjects)
+  so demo trial selection doesn't rely on memorized data.
+
+**NOT yet done / immediate next steps**:
+1. Run `curate_demo_trials.py` against `kfall_SA06` for real, pick 2-3
+   actually-verified-clean trials for the live demo (in progress at
+   time of writing).
+2. Full 32-fold run: still not attempted (would be ~40 GPU-hours at
+   observed per-fold timing) -- deliberately deferred, would likely
+   just reproduce the same instability 32x given two structural
+   hypotheses were already ruled out without fixing it.
+3. TinyTransformer: still zero real training runs.
+4. Real fix for `pre_impact` (richer temporal context per window, or
+   accepting a data-scarcity ceiling) -- explicitly POST-demo work, not
+   attempted this session by design (2-day live-demo deadline took
+   priority over continuing the root-cause investigation).
+5. Detection pipeline (0.836 acc / 0.921 ROC-AUC) remains the strongest,
+   most demo-ready component -- should be the centerpiece of the live
+   demo, with prediction shown via curated pre-recorded trials + the
+   smoothing layer, framed honestly as active research rather than a
+   finished feature.

@@ -40,6 +40,16 @@ class TrainingConfig:
     val_fraction: float = 0.15         # fraction of a fold's TRAIN subjects held out for early-stopping validation (never the LOSO test subject itself)
     seed: int = 42
     device: str = field(default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu")
+    # MUST match the window_length_s used to build `windows_df`'s start_frame/
+    # end_frame boundaries (via PredictionWindowingConfig, converted to samples
+    # at the trial's sample rate). Kept as an explicit config field rather than
+    # a hardcoded Dataset default -- previously this was a disconnected
+    # `window_length_samples=100` default inside PredictionWindowDataset with
+    # no link back to whatever windowing config actually built the manifest,
+    # which would silently edge-pad windows to the wrong length instead of
+    # erroring if the two ever diverged (e.g. when experimenting with a
+    # shorter window_length_s to test pre_impact class separability).
+    window_length_samples: int = 100
 
 
 @dataclass
@@ -184,14 +194,20 @@ def train_one_fold(
     val_df = fold_train_df[fold_train_df["global_subject_id"].isin(val_subjects)].reset_index(drop=True)
 
     train_loader = DataLoader(
-        PredictionWindowDataset(train_df),
+        PredictionWindowDataset(train_df, window_length_samples=config.window_length_samples),
         batch_sampler=TrialGroupedBatchSampler(train_df, config.batch_size, shuffle=True, seed=config.seed),
     )
     # Val/test: no need for trial-grouped shuffling (that's a training-
     # dynamics concern, per torch_dataset.py's docstring) -- plain
     # sequential batching is fine and simpler here.
-    val_loader = DataLoader(PredictionWindowDataset(val_df), batch_size=config.batch_size, shuffle=False)
-    test_loader = DataLoader(PredictionWindowDataset(test_df), batch_size=config.batch_size, shuffle=False)
+    val_loader = DataLoader(
+        PredictionWindowDataset(val_df, window_length_samples=config.window_length_samples),
+        batch_size=config.batch_size, shuffle=False,
+    )
+    test_loader = DataLoader(
+        PredictionWindowDataset(test_df, window_length_samples=config.window_length_samples),
+        batch_size=config.batch_size, shuffle=False,
+    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 

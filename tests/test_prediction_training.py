@@ -199,6 +199,6 @@ def test_train_one_fold_restores_best_epoch_weights_not_last_epoch(tmp_path):
     val_df = fold_train_df[fold_train_df["global_subject_id"].isin(val_subjects)].reset_index(drop=True)
     val_loader = DataLoader(PredictionWindowDataset(val_df), batch_size=config.batch_size, shuffle=False)
 
-    replayed_val_loss = run_epoch(model, val_loader, nn.CrossEntropyLoss(), device="cpu", optimizer=None)
+    replayed_val_loss = run_epoch(model, val_loader, nn.CrossEntropyLoss(), device=config.device, optimizer=None)
 
     assert replayed_val_loss == pytest.approx(result.best_val_loss, rel=1e-4)

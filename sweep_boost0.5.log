@@ -38,3 +38,4 @@ weighted avg       0.83      0.78      0.80     10447
     [2/2] epoch   2/20  train_loss=0.1356  val_loss=0.1255  (378.4s/epoch)
     [2/2] epoch   3/20  train_loss=0.1226  val_loss=0.1184  (398.0s/epoch)
     [2/2] epoch   4/20  train_loss=0.1135  val_loss=0.1150  (391.1s/epoch)
+    [2/2] epoch   5/20  train_loss=0.1063  val_loss=0.1124  (390.6s/epoch)

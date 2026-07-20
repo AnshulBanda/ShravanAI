@@ -120,6 +120,14 @@ def main() -> None:
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--pre-impact-boost", type=float, default=2.0,
                          help="Extra focal-loss weight multiplier on the pre_impact class, on top of inverse-frequency weighting. See prediction/losses.py.")
+    parser.add_argument("--window-length-s", type=float, default=1.0,
+                         help="Window length in seconds. Default 1.0 matches the original blueprint spec. A shorter window (e.g. 0.5) "
+                              "is worth trying since KFall's real onset-to-impact gap is only ~0.6-1.0s -- a 1.0s window can be close "
+                              "to or larger than the whole event, squeezing pre_impact into a thin, hard-to-learn label band. "
+                              "This flag now correctly threads into BOTH the windows manifest AND TrainingConfig.window_length_samples "
+                              "(see prediction/training.py) -- previously the Dataset's window_length_samples was a disconnected "
+                              "hardcoded default, which would have silently edge-padded a shorter manifest window back up to 100 "
+                              "samples instead of actually shrinking it.")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -131,8 +139,12 @@ def main() -> None:
     print(f"Loading trial manifest from {args.manifest}...")
     trial_df = load_manifest(args.manifest)
 
-    print("Building dense windows manifest (this can take a while on the full KFall set)...")
-    windows_df = build_windows_manifest(trial_df, config=PredictionWindowingConfig())
+    windowing_config = PredictionWindowingConfig(window_length_s=args.window_length_s)
+    window_length_samples = round(args.window_length_s * windowing_config.target_rate_hz)
+
+    print(f"Building dense windows manifest (window_length_s={args.window_length_s}, "
+          f"window_length_samples={window_length_samples}; this can take a while on the full KFall set)...")
+    windows_df = build_windows_manifest(trial_df, config=windowing_config)
     print(f"  {len(windows_df)} windows across {windows_df['global_subject_id'].nunique()} subjects")
     print(f"  label distribution: {windows_df['label'].value_counts().to_dict()}")
 
@@ -153,6 +165,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         early_stopping_patience=args.early_stopping_patience,
         device=device,
+        window_length_samples=window_length_samples,
     )
 
     fold_reports = []
@@ -183,7 +196,7 @@ def main() -> None:
 
         checkpoint_dir = output_dir / "checkpoints"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_path = checkpoint_dir / f"{args.model}_boost{args.pre_impact_boost}_{fold.test_subject}.pt"
+        checkpoint_path = checkpoint_dir / f"{args.model}_boost{args.pre_impact_boost}_win{args.window_length_s}_{fold.test_subject}.pt"
         torch.save(model.state_dict(), checkpoint_path)
         print(f"  checkpoint saved to {checkpoint_path}")
 
@@ -229,7 +242,7 @@ def main() -> None:
     # which is exactly what nearly happened running a boost=1.0 vs.
     # boost=0.5 sweep back to back on the same --model.
     fold_tag = args.test_subject or (f"{len(folds)}folds" if args.max_folds else "allfolds")
-    report_path = output_dir / f"{args.model}_boost{args.pre_impact_boost}_ep{args.max_epochs}_{fold_tag}_loso_report.json"
+    report_path = output_dir / f"{args.model}_boost{args.pre_impact_boost}_win{args.window_length_s}_ep{args.max_epochs}_{fold_tag}_loso_report.json"
     with open(report_path, "w") as f:
         json.dump({
             "model": args.model,

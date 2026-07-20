@@ -41,21 +41,49 @@ not inside it) for the full design rationale.
       onset/impact labeling, LOSO folds, and features all REAL-DATA
       VERIFIED (see PROJECT_CHECKPOINT.md). Models, focal loss,
       lead-time metric, training loop, and LOSO training CLI script
-      all built and RUN FOR REAL (8/32 folds, ConvLSTM, on Anshul's
-      RTX 3050 Ti). 268 tests passing.
-      **KEY OPEN FINDING**: real training converges cleanly and
-      reproducibly across folds, but `pre_impact` precision stays
-      stuck at 0.08-0.16 and mean lead time stays ~2.3-3.4s (real
-      onset->impact gap is only ~0.6-1.0s) REGARDLESS of loss-weight
-      sweep (boost 2.0/1.0/0.5 all show the same problem) -- so the
-      loss weighting is NOT the main lever. A per-window diagnostic
-      script (`scripts/inspect_trial_predictions.py`) was built to
-      investigate this directly but has NOT YET been run against a
-      real trained checkpoint -- that's the concrete next step. See
-      PROJECT_CHECKPOINT.md's latest Stage 7 section for the full
-      writeup, real numbers, and next-step reasoning. NOT started yet:
-      full 32-fold run, TinyTransformer branch (zero real runs so
-      far), Euler-angle channel gap.
+      all built and RUN FOR REAL (10/32 folds total across runs,
+      ConvLSTM, on Anshul's RTX 3050 Ti). 268/268 tests passing.
+      **KEY OPEN FINDING, UPDATED**: `pre_impact` precision stays stuck
+      around 0.09-0.16 regardless of loss-weight boost (2.0/1.0/0.5)
+      AND regardless of window length (1.0s vs. 0.5s, both tried for
+      real) -- both were plausible structural fixes and BOTH were
+      ruled out this session with real experiments, not just
+      hypothesized away. Per-trial diagnosis
+      (`scripts/inspect_trial_predictions.py`) shows THREE DIFFERENT
+      failure shapes across three real trials (early false-alarm,
+      early false-alarm at a different onset distance, and a
+      late/missed detection) -- not one clean, fixable mechanism.
+      Aggregate analysis across a whole held-out fold
+      (`scripts/analyze_temporal_errors.py`, NEW) shows false-positive
+      rate is highest (60-90%) on ordinary pre-onset activity WITHIN
+      fall trials -- higher than the ADL baseline (29%) -- suggesting
+      the model can't yet distinguish genuine pre-fall motion from a
+      staged task's simply-more-energetic lead-in. Per-trial
+      normalization/leakage was checked directly in the code and ruled
+      out (no scaler exists anywhere in the prediction pipeline).
+      Leading remaining theory (untested): the model lacks broader
+      trial context (e.g. elapsed time since trial start) needed to
+      disambiguate this. **Root-cause work is intentionally PAUSED**
+      in favor of a 2-day live-demo deadline -- see below.
+      NOT started yet: full 32-fold run, TinyTransformer branch (zero
+      real runs so far), Euler-angle channel gap.
+- [ ] **Live demo layer (NEW, in progress)** — since the `pre_impact`
+      issue above won't be root-caused before a live demo, built a
+      smoothing/hysteresis layer (`prediction/live_smoothing.py`) that
+      turns the existing checkpoint's jittery raw per-window output
+      into a stable displayed alert state (EMA + hysteresis + a
+      minimum-hold latch once FALL triggers) — sanity-checked against
+      a real noisy trace, collapses dozens of flickering raw
+      predictions into a handful of clean state changes with no added
+      detection latency. `scripts/run_live_demo.py` replays a real
+      trial through model+smoother with live-paced colored terminal
+      output for presenting. `scripts/curate_demo_trials.py` batch-
+      scans a held-out subject's real trials to find ones that are
+      actually safe to demo (no early false alarm, does catch the real
+      fall) rather than picking trials by hand — first hand-picked
+      trial (`kfall_SA06/T22/R01`) turned out to false-alarm at t=0.00s
+      when run through the demo path, which is what prompted building
+      the curation script instead of continuing to guess.
 
 ## Setup
 
